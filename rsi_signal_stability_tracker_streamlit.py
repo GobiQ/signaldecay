@@ -718,7 +718,13 @@ with col1:
                 year_data = eq_df[eq_df.index.to_period("Y") == year]
                 if not year_data.empty:
                     last_day = year_data.index[-1]
-                    fig.add_vline(x=last_day, line=dict(width=1, dash="dot"))
+                    # Convert to datetime if needed and add more visible line
+                    fig.add_vline(
+                        x=last_day, 
+                        line=dict(width=2, dash="dot", color="red", opacity=0.7),
+                        annotation_text=f"EOY {year}",
+                        annotation_position="top"
+                    )
             
             fig.update_layout(
                 margin=dict(l=10, r=10, t=30, b=10),
