@@ -128,36 +128,42 @@ def build_event_table(prices: pd.DataFrame, alloc_bool: pd.Series) -> pd.DataFra
 
 def calculate_tax_adjusted_equity(strategy_returns: pd.Series, tax_rate: float) -> pd.Series:
     """
-    Apply year-end tax on POSITIVE yearly gains and carry forward thereafter.
-    Leaves intra-year path untouched; tax hits only on the final trading day of each year.
+    Apply year-end tax on POSITIVE yearly gains.
+    Taxes reduce the base for future compounding (multiplicative adjustment at year-end).
     """
-    tax = tax_rate / 100.0
-    eq = (1 + strategy_returns.fillna(0)).cumprod().copy()
-
-    # Work year by year
-    years = eq.index.to_period("Y").unique()
+    tax = float(tax_rate) / 100.0
+    eq = (1.0 + strategy_returns.fillna(0.0)).cumprod()
     eq_tax = eq.copy()
-    prev_year_end_level = None
+
+    # Track the start-of-year level AFTER prior taxes
+    start_level = None
+    years = eq.index.to_period("Y").unique()
 
     for y in years:
         mask = (eq.index.to_period("Y") == y)
-        year_eq = eq[mask]
-        if year_eq.empty:
+        if not mask.any():
             continue
 
-        start_level = eq_tax[mask].iloc[0] if prev_year_end_level is None else prev_year_end_level
-        end_idx = year_eq.index[-1]
+        start_idx = eq.index[mask][0]
+        end_idx   = eq.index[mask][-1]
 
-        # Gain relative to start of year (after prior taxes)
+        # Start level is prior year end (after tax), or the first point in the series
+        if start_level is None:
+            start_level = eq_tax.loc[start_idx]
+
         end_level = eq_tax.loc[end_idx]
         year_gain = end_level - start_level
 
         if year_gain > 0:
-            tax_amt = year_gain * tax
-            # Apply only on/after the year-end day
-            eq_tax.loc[end_idx:] = eq_tax.loc[end_idx:] - tax_amt
-
-        prev_year_end_level = eq_tax.loc[end_idx]
+            # After-tax end-of-year level
+            end_after_tax = start_level + (1.0 - tax) * (end_level - start_level)
+            # Scale FUTURE path by the ratio of after-tax to before-tax level
+            factor = end_after_tax / end_level  # < 1 when taxed
+            eq_tax.loc[end_idx:] = eq_tax.loc[end_idx:] * factor
+            start_level = eq_tax.loc[end_idx]   # carry forward post-tax end as next year's start
+        else:
+            # No tax, just roll the end level forward
+            start_level = end_level
 
     return eq_tax
 
@@ -704,6 +710,12 @@ with col1:
             fig = go.Figure()
             for col in eq_df.columns:
                 fig.add_trace(go.Scatter(x=dates, y=eq_df[col], mode='lines', name=col))
+            
+            # Add year-end markers to show tax impact
+            year_ends = pd.to_datetime(pd.Series(eq_df.index).to_period("Y").drop_duplicates().astype(str)) - pd.Timedelta(days=0)
+            for d in year_ends:
+                fig.add_vline(x=d, line=dict(width=1, dash="dot"))
+            
             fig.update_layout(
                 margin=dict(l=10, r=10, t=30, b=10),
                 height=420,
