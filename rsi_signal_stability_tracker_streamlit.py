@@ -588,6 +588,67 @@ with col2:
     st.write(f"Signal on **{source_ticker}**, returns on **{target_ticker}**.")
     st.write(thresh_note)
 
+    # Win rate display (only for fixed horizon mode)
+    if edge_mode == "Fixed horizon (days)":
+        st.markdown("---")
+        st.subheader("Rolling Win Rate")
+        st.caption("Percentage of positive returns in rolling window")
+        
+        wr_stats = prices['rolling_wr'].dropna()
+        if len(wr_stats) > 0:
+            st.metric("Mean win rate", f"{wr_stats.mean():.1%}")
+            st.metric("Min win rate", f"{wr_stats.min():.1%}")
+            st.metric("Max win rate", f"{wr_stats.max():.1%}")
+            
+            # Simple win rate plot
+            wr_plot = prices[['rolling_wr']].copy()
+            wr_plot['rolling_wr'] = pd.to_numeric(wr_plot['rolling_wr'], errors='coerce')
+            wr_plot = wr_plot.replace([np.inf, -np.inf], np.nan)
+            
+            if not wr_plot.empty:
+                dates = wr_plot.index.to_pydatetime()
+                vals = wr_plot['rolling_wr'].to_numpy(dtype=float)
+                
+                fig_wr = go.Figure()
+                valid_mask = ~np.isnan(vals)
+                if valid_mask.any():
+                    fig_wr.add_trace(go.Scatter(
+                        x=dates[valid_mask], 
+                        y=vals[valid_mask], 
+                        mode='lines', 
+                        name='Win Rate',
+                        line=dict(color='green', width=2)
+                    ))
+                
+                fig_wr.update_layout(
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    height=300,
+                    xaxis_title='Date',
+                    yaxis_title='Win Rate (%)',
+                    yaxis=dict(tickformat='.1%'),
+                    showlegend=False
+                )
+                st.plotly_chart(fig_wr, use_container_width=True)
+        else:
+            st.info("No win rate data available")
+    else:
+        st.markdown("---")
+        st.subheader("Event-Based Stats")
+        st.caption("Statistics for trade-to-exit mode")
+        
+        if event_df is not None and not event_df.empty:
+            total_events = len(event_df)
+            winning_events = len(event_df[event_df['excess'] > 0])
+            win_rate = winning_events / total_events if total_events > 0 else 0
+            
+            st.metric("Total events", f"{total_events}")
+            st.metric("Winning events", f"{winning_events}")
+            st.metric("Win rate", f"{win_rate:.1%}")
+            st.metric("Avg excess return", f"{event_df['excess'].mean():.2%}")
+            st.metric("Avg duration", f"{event_df['duration'].mean():.1f} days")
+        else:
+            st.info("No events detected")
+
 # -----------------------------
 # Data table & downloads
 # -----------------------------
