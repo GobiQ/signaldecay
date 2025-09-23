@@ -712,9 +712,13 @@ with col1:
                 fig.add_trace(go.Scatter(x=dates, y=eq_df[col], mode='lines', name=col))
             
             # Add year-end markers to show tax impact
-            year_ends = pd.to_datetime(pd.Series(eq_df.index).to_period("Y").drop_duplicates().astype(str)) - pd.Timedelta(days=0)
-            for d in year_ends:
-                fig.add_vline(x=d, line=dict(width=1, dash="dot"))
+            year_ends = eq_df.index.to_period("Y").drop_duplicates()
+            for year in year_ends:
+                # Get the last trading day of each year
+                year_data = eq_df[eq_df.index.to_period("Y") == year]
+                if not year_data.empty:
+                    last_day = year_data.index[-1]
+                    fig.add_vline(x=last_day, line=dict(width=1, dash="dot"))
             
             fig.update_layout(
                 margin=dict(l=10, r=10, t=30, b=10),
