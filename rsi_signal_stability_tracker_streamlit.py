@@ -521,9 +521,9 @@ valid_edge_points = int(prices['rolling_edge'].notna().sum())
 edge_median = prices['rolling_edge'].median(skipna=True)
 edge_mean = prices['rolling_edge'].mean(skipna=True)
 
-# Compare event vs non-event forward returns (static over whole sample)
-evt = prices.loc[prices['signal'], 'fwd_ret'].dropna()
-nonevt = prices.loc[~prices['signal'], 'fwd_ret'].dropna()
+# Compare event vs non-event forward returns (static over whole sample) - entry-aligned
+evt = prices.loc[prices['signal'], 'fwd_ret_entry'].dropna()
+nonevt = prices.loc[~prices['signal'], 'fwd_ret_entry'].dropna()
 if len(evt) > 1 and len(nonevt) > 1:
     # Welch t-test
     t_stat, p_val = stats.ttest_ind(evt, nonevt, equal_var=False)
@@ -972,7 +972,9 @@ with st.expander("Show data / download"):
     show_cols = [
         'close_src', 'close_tgt', 'close_cmp',
         'rsi', 'rsi_thresh', 'signal',
-        'fwd_ret', 'event_ret', 'rolling_edge', 'rolling_wr', 'rolling_event_count', 'time_in_market'
+        'fwd_ret', 'fwd_ret_entry', 'fwd_ret_cmp', 'fwd_ret_cmp_entry',
+        'event_ret', 'rolling_edge', 'rolling_wr',
+        'rolling_event_count', 'time_in_market'
     ]
     out = prices[show_cols].copy()
     st.dataframe(out.tail(1000))
