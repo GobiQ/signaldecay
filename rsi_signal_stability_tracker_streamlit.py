@@ -766,13 +766,17 @@ with col1:
 
             # Reference lines
             ev_mean = float(np.nanmean(ev)) if ev.size else np.nan
+            ev_median = float(np.nanmedian(ev)) if ev.size else np.nan
             figd.add_vline(x=0.0, line=dict(dash="dot"))
             if np.isfinite(ev_mean):
                 figd.add_vline(x=ev_mean, line=dict(color="black", dash="dash"),
-                               annotation_text=f"Event mean {ev_mean:.2%}", annotation_position="top")
+                               annotation_text=f"Mean {ev_mean:.2%}", annotation_position="top")
+            if np.isfinite(ev_median):
+                figd.add_vline(x=ev_median, line=dict(color="red", dash="dash"),
+                               annotation_text=f"Median {ev_median:.2%}", annotation_position="bottom")
 
             figd.update_layout(
-                margin=dict(l=10, r=10, t=10, b=10), height=360,
+                margin=dict(l=10, r=10, t=40, b=10), height=400,
                 xaxis_title=x_label, yaxis_title="Probability"
             )
             st.plotly_chart(figd, use_container_width=True)
@@ -817,11 +821,14 @@ with col1:
                 ))
                 figd.add_vline(x=0.0, line=dict(dash="dot"))
                 mean_v = float(np.nanmean(vals))
+                median_v = float(np.nanmedian(vals))
                 figd.add_vline(x=mean_v, line=dict(color="black", dash="dash"),
                                annotation_text=f"Mean {mean_v:.2%}", annotation_position="top")
+                figd.add_vline(x=median_v, line=dict(color="red", dash="dash"),
+                               annotation_text=f"Median {median_v:.2%}", annotation_position="bottom")
 
                 figd.update_layout(
-                    margin=dict(l=10, r=10, t=10, b=10), height=360,
+                    margin=dict(l=10, r=10, t=40, b=10), height=400,
                     xaxis_title=x_label, yaxis_title="Probability"
                 )
                 st.plotly_chart(figd, use_container_width=True)
