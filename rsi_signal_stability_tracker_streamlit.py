@@ -7,6 +7,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
+import warnings
 from datetime import date, timedelta
 import yfinance as yf
 from scipy import stats
@@ -55,6 +57,19 @@ def rolling_signal_edge(event_returns: pd.Series, window: int, min_events: int =
     edge = event_sum / event_counts.replace(0, np.nan)
     edge[event_counts < min_events] = np.nan
     return edge
+
+def _sanitize_for_plot(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure no tz, no object numerics, drop non-finite."""
+    if not df.index.tz is None:
+        df = df.copy()
+        df.index = df.index.tz_convert(None)
+    # Replace infs, coerce numerics, drop NaNs
+    df = df.replace([np.inf, -np.inf], np.nan)
+    for c in df.columns:
+        if pd.api.types.is_object_dtype(df[c]):
+            df[c] = pd.to_numeric(df[c], errors='coerce')
+    df = df.dropna(how='any')
+    return df
 
 # -----------------------------
 # UI
@@ -155,21 +170,27 @@ col1, col2 = st.columns([2, 1], gap="large")
 with col1:
     st.subheader("Rolling Signal Edge (mean forward return on event dates)")
     st.caption("Oscillating line around 0 indicates changing edge over time. Positive values suggest the condition tended to precede gains over the chosen horizon.")
-    plot_df = prices[['rolling_edge']].dropna().astype({'rolling_edge': 'float64'})
-    
-    if plot_df.empty:
-        st.info("Not enough events within the evaluation window to compute a rolling edge. "
+
+    plot_df = prices[['rolling_edge']].copy()
+    # Clean all non-finite & enforce numeric
+    plot_df['rolling_edge'] = pd.to_numeric(plot_df['rolling_edge'], errors='coerce')
+    plot_df = _sanitize_for_plot(plot_df)
+
+    if plot_df.empty or plot_df['rolling_edge'].size < 2:
+        st.info("Not enough clean data points to plot the rolling edge.\n"
                 "Try reducing min events, shortening horizon, or extending the date range.")
     else:
-        plot_df_reset = plot_df.reset_index().rename(columns={'index': 'date'})
-        fig = px.line(
-            plot_df_reset,
-            x='date',
-            y='rolling_edge',
-            labels={'rolling_edge': f'Rolling mean of {horizon}D fwd returns', 'date': 'Date'},
-            title=None,
+        # Build via graph_objects (avoid PX's dataframe coercion path)
+        dates = plot_df.index.to_pydatetime()
+        vals = plot_df['rolling_edge'].to_numpy(dtype=float)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=dates, y=vals, mode='lines', name='Rolling edge'))
+        fig.update_layout(
+            margin=dict(l=10, r=10, t=10, b=10),
+            height=420,
+            xaxis_title='Date',
+            yaxis_title=f'Rolling mean of {horizon}D fwd returns'
         )
-        fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=420)
         st.plotly_chart(fig, use_container_width=True)
 
     if build_equity:
@@ -180,11 +201,18 @@ with col1:
         eq = (1 + strat_ret.fillna(0)).cumprod()
         bench = (1 + ret.fillna(0)).cumprod()
         eq_df = pd.DataFrame({'Strategy': eq, 'Buy&Hold': bench})
-        eq_reset = eq_df.reset_index().rename(columns={'index': 'date'})
-        fig2 = px.line(eq_reset, x='date', y=['Strategy', 'Buy&Hold'],
-                       labels={'date': 'Date'})
-        fig2.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=420)
-        st.plotly_chart(fig2, use_container_width=True)
+        eq_df = _sanitize_for_plot(eq_df)
+
+        if eq_df.empty or eq_df.shape[0] < 2:
+            st.info("Not enough clean data to draw the equity curve.")
+        else:
+            dates2 = eq_df.index.to_pydatetime()
+            fig2 = go.Figure()
+            fig2.add_trace(go.Scatter(x=dates2, y=eq_df['Strategy'].astype(float), mode='lines', name='Strategy'))
+            fig2.add_trace(go.Scatter(x=dates2, y=eq_df['Buy&Hold'].astype(float), mode='lines', name='Buy & Hold'))
+            fig2.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=420,
+                               xaxis_title='Date', yaxis_title='Equity (normalized)')
+            st.plotly_chart(fig2, use_container_width=True)
 
 with col2:
     st.subheader("Summary")
@@ -229,6 +257,16 @@ with st.expander("Show data / download"):
             file_name=f"{ticker}_rsi_signal_stability.csv",
             mime='text/csv'
         )
+
+# Debug expander (temporary, helpful on Cloud)
+with st.expander("Debug (dtypes & head)—safe to remove later"):
+    try:
+        st.write("rolling_edge dtype:", prices['rolling_edge'].dtype)
+        st.write("Any infs?:", np.isinf(prices['rolling_edge']).any())
+        st.write("Head (non-null):")
+        st.dataframe(prices[['rolling_edge']].dropna().head(5))
+    except Exception as e:
+        st.write("Debug exception:", repr(e))
 
 # -----------------------------
 # Notes
