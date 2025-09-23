@@ -384,7 +384,7 @@ with col1:
                         end_date = dates[group[-1]]
                         fig.add_vrect(
                             x0=start_date, x1=end_date,
-                            fillcolor="lightgray", opacity=0.2,
+                            fillcolor="lightgray", opacity=0.05,
                             layer="below", line_width=0,
                             annotation_text="Insufficient data", 
                             annotation_position="top left"
