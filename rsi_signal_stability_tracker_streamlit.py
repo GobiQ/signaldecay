@@ -217,7 +217,7 @@ with st.sidebar:
     
     end_date = st.date_input("End date", value=today)
 
-    rsi_len = st.number_input("RSI length", min_value=2, max_value=200, value=10, step=1,
+    rsi_len = st.number_input("RSI length", min_value=2, max_value=200, value=80, step=1,
                              help="Number of periods used to calculate RSI. Shorter periods (10-14) are more sensitive to recent price changes, while longer periods (20-30) are smoother and less noisy.")
 
     signal_mode = st.radio(
@@ -228,8 +228,21 @@ with st.sidebar:
     )
 
     if signal_mode == "Absolute RSI":
-        rsi_threshold = st.slider("RSI threshold", min_value=0.0, max_value=100.0, value=30.0, step=0.5,
-                                 help="Fixed RSI threshold for signal generation. Values below 30 are considered oversold, above 70 are overbought. Choose based on your strategy (mean reversion vs momentum).")
+        rsi_threshold_input = st.text_input(
+            "RSI threshold",
+            value="30.0",
+            help="Fixed RSI threshold for signal generation. Values below 30 are considered oversold, above 70 are overbought. Enter as decimal (e.g., 30.5)"
+        )
+        
+        # Convert text input to float with validation
+        try:
+            rsi_threshold = float(rsi_threshold_input)
+            if rsi_threshold < 0.0 or rsi_threshold > 100.0:
+                st.warning("RSI threshold must be between 0.0 and 100.0. Using 30.0 as default.")
+                rsi_threshold = 30.0
+        except ValueError:
+            st.warning("Invalid RSI threshold format. Using 30.0 as default.")
+            rsi_threshold = 30.0
         perc_scope = None
         percentile = None
         perc_window = None
@@ -263,11 +276,21 @@ with st.sidebar:
              "Trade-to-exit: score each contiguous allocation period (from entry until exit)."
     )
 
-    win_thresh = st.number_input(
+    win_thresh_input = st.text_input(
         "Win threshold (return)",
-        min_value=-0.05, max_value=0.05, value=0.0, step=0.001,
-        help="Return cutoff to count as a win (0.0 = break-even, 0.001 = +0.1%)."
+        value="0.0",
+        help="Return cutoff to count as a win (0.0 = break-even, 0.001 = +0.1%). Enter as decimal (e.g., 0.001 for 0.1%)"
     )
+    
+    # Convert text input to float with validation
+    try:
+        win_thresh = float(win_thresh_input)
+        if win_thresh < -0.05 or win_thresh > 0.05:
+            st.warning("Win threshold must be between -0.05 and 0.05. Using 0.0 as default.")
+            win_thresh = 0.0
+    except ValueError:
+        st.warning("Invalid win threshold format. Using 0.0 as default.")
+        win_thresh = 0.0
     show_wr_baseline = st.checkbox("Show baseline win rate", value=True)
 
     if edge_mode == "Fixed horizon (days)":
