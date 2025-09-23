@@ -285,6 +285,15 @@ prices['event_ret'] = np.where(prices['signal'], prices['fwd_ret'], np.nan)
 # Rolling signal edge (oscillates around 0 if no edge)
 prices['rolling_edge'] = rolling_signal_edge(prices['event_ret'], window=eval_window, min_events=min_ev)
 
+# Debug: Check the rolling edge calculation
+st.write("🔍 **Debug - Rolling edge calculation:**")
+st.write(f"- Total events (signal=True): {prices['signal'].sum()}")
+st.write(f"- Event returns non-null count: {prices['event_ret'].notna().sum()}")
+st.write(f"- Rolling edge non-null count: {prices['rolling_edge'].notna().sum()}")
+st.write(f"- Rolling edge date range: {prices['rolling_edge'].dropna().index.min().date()} to {prices['rolling_edge'].dropna().index.max().date()}")
+st.write(f"- Min events required: {min_ev}")
+st.write(f"- Evaluation window: {eval_window} days")
+
 # Ensure numeric dtype for computed columns
 for c in ['rsi', 'fwd_ret', 'event_ret', 'rolling_edge']:
     if c in prices.columns:
