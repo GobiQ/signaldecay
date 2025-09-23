@@ -682,9 +682,12 @@ with col1:
 
         # --- Equity Curve: Target vs Comparison (with taxes) ---
         
-        # Daily returns (adjusted close pct changes)
-        ret_tgt_s = pd.Series(prices['close_tgt'].pct_change(), index=prices.index).fillna(0.0)
-        ret_cmp_s = pd.Series(prices['close_cmp'].pct_change(), index=prices.index).fillna(0.0)
+        # Daily returns (adjusted close pct changes) - ensure 1D arrays
+        ret_tgt = prices['close_tgt'].pct_change().values.flatten()
+        ret_cmp = prices['close_cmp'].pct_change().values.flatten()
+        
+        ret_tgt_s = pd.Series(ret_tgt, index=prices.index).fillna(0.0)
+        ret_cmp_s = pd.Series(ret_cmp, index=prices.index).fillna(0.0)
 
         # EOD decision at t-1 → hold on day t
         alloc_bool = prices['signal'].shift(1).fillna(False).to_numpy(dtype=bool)
