@@ -76,22 +76,15 @@ def _sanitize_for_plot(df: pd.DataFrame) -> pd.DataFrame:
 # -----------------------------
 st.set_page_config(page_title="RSI Signal Stability Tracker", page_icon="📈", layout="wide")
 
-st.title("📈 RSI Signal Stability / Decay Tracker")
-st.caption("Analyze how an RSI-based entry condition performs over time. Choose an absolute RSI threshold or a percentile that translates to a rolling RSI figure.")
+st.title("📈 Cross-Asset RSI Signal Tracker")
+st.caption("Analyze how an RSI-based entry condition on one asset performs when allocating to another asset. Choose an absolute RSI threshold or a percentile that translates to a rolling RSI figure.")
 
 with st.sidebar:
     st.header("Controls")
-    ticker = st.text_input("Ticker (Yahoo Finance)", value="SPY")
     
-    cross_asset = st.checkbox("Cross-asset mode (signal on source, returns on target)", value=False)
-    if cross_asset:
-        source_ticker = st.text_input("Source ticker (for RSI signal)", value="SPY")
-        target_ticker = st.text_input("Target ticker (to allocate / measure returns)", value="UVXY")
-        comparison_ticker = st.text_input("Comparison ticker (held when signal condition is FALSE)", value="BIL")
-    else:
-        source_ticker = ticker
-        target_ticker = ticker
-        comparison_ticker = "BIL"  # Default to cash-like instrument
+    source_ticker = st.text_input("Source ticker (for RSI signal)", value="SPY")
+    target_ticker = st.text_input("Target ticker (to allocate / measure returns)", value="UVXY")
+    comparison_ticker = st.text_input("Comparison ticker (held when signal condition is FALSE)", value="BIL")
     
     today = date.today()
     default_start = date(today.year-8, 1, 1)  # ~8 years by default
@@ -120,8 +113,8 @@ with st.sidebar:
 # -----------------------------
 # Data & Signal
 # -----------------------------
-if not ticker:
-    st.warning("Enter a ticker symbol to begin.")
+if not source_ticker or not target_ticker or not comparison_ticker:
+    st.warning("Enter all three ticker symbols to begin.")
     st.stop()
 
 # Load all three tickers
@@ -145,12 +138,14 @@ tgt.index = pd.to_datetime(tgt.index).tz_localize(None)
 cmp.index = pd.to_datetime(cmp.index).tz_localize(None)
 
 # Inner-join on trading days present in ALL series so the horizon aligns
-prices = src.join(tgt, how="inner", lsuffix="_src", rsuffix="_tgt")
-prices = prices.join(cmp, how="inner")
-prices.rename(
-    columns={"close_src": "close_src", "close_tgt": "close_tgt", "close": "close_cmp"},
-    inplace=True
-)
+# First, rename columns before joining to avoid confusion
+src_renamed = src.rename(columns={'close': 'close_src'})
+tgt_renamed = tgt.rename(columns={'close': 'close_tgt'})
+cmp_renamed = cmp.rename(columns={'close': 'close_cmp'})
+
+# Join all three dataframes
+prices = src_renamed.join(tgt_renamed, how="inner")
+prices = prices.join(cmp_renamed, how="inner")
 
 prices['rsi'] = compute_rsi(prices['close_src'], rsi_len)
 prices['fwd_ret'] = forward_return(prices['close_tgt'], horizon)
@@ -282,8 +277,7 @@ with col2:
 
     st.markdown("---")
     st.markdown("**Threshold reference**")
-    if cross_asset:
-        st.write(f"Signal on **{source_ticker}**, returns on **{target_ticker}**.")
+    st.write(f"Signal on **{source_ticker}**, returns on **{target_ticker}**.")
     if signal_mode == "Absolute RSI":
         st.write(f"Using constant RSI threshold = **{rsi_threshold:.1f}**")
     else:
@@ -308,7 +302,7 @@ with st.expander("Show data / download"):
         st.download_button(
             label="Download CSV",
             data=csv,
-            file_name=f"{ticker}_rsi_signal_stability.csv",
+            file_name=f"{source_ticker}_{target_ticker}_rsi_signal_stability.csv",
             mime='text/csv'
         )
 
