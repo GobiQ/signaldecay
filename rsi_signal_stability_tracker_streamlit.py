@@ -344,14 +344,39 @@ with col1:
         # Build via graph_objects (avoid PX's dataframe coercion path)
         dates = plot_df.index.to_pydatetime()
         vals = plot_df['rolling_edge'].to_numpy(dtype=float)
+        
+        # Create separate traces for valid data and NaN periods
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=dates, y=vals, mode='lines', name='Rolling edge', 
-                                connectgaps=False))  # Don't connect gaps where data is NaN
+        
+        # Add trace for valid rolling edge values (solid line)
+        valid_mask = ~np.isnan(vals)
+        if valid_mask.any():
+            fig.add_trace(go.Scatter(
+                x=dates[valid_mask], 
+                y=vals[valid_mask], 
+                mode='lines', 
+                name='Rolling edge (valid data)',
+                line=dict(color='blue', width=2)
+            ))
+        
+        # Add trace for NaN periods (dotted line at y=0 to indicate "no data")
+        nan_mask = np.isnan(vals)
+        if nan_mask.any():
+            fig.add_trace(go.Scatter(
+                x=dates[nan_mask], 
+                y=np.zeros(nan_mask.sum()), 
+                mode='lines', 
+                name='Insufficient data (no edge calculated)',
+                line=dict(color='lightgray', width=1, dash='dot'),
+                opacity=0.6
+            ))
+        
         fig.update_layout(
             margin=dict(l=10, r=10, t=10, b=10),
             height=420,
             xaxis_title='Date',
-            yaxis_title=f'Rolling mean of {horizon}D fwd returns (on {target_ticker})'
+            yaxis_title=f'Rolling mean of {horizon}D fwd returns (on {target_ticker})',
+            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
         )
         st.plotly_chart(fig, use_container_width=True)
 
