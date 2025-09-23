@@ -691,7 +691,9 @@ with st.expander("Show data / download"):
 
     if download_switch:
         # Use full dataset for CSV download, not just the displayed tail(1000)
-        csv = prices[show_cols].to_csv(index=True).encode('utf-8')
+        full_data = prices[show_cols].copy()
+        st.write(f"📊 **CSV will contain {len(full_data)} rows** from {full_data.index.min().date()} to {full_data.index.max().date()}")
+        csv = full_data.to_csv(index=True).encode('utf-8')
         st.download_button(
             label="Download CSV",
             data=csv,
