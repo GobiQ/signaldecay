@@ -157,7 +157,7 @@ if cmp.empty:
 
 # Auto-adjust start date to earliest common date if requested
 if auto_start:
-    # Find the latest start date among all three tickers
+    # Find the earliest common date where all three tickers have data
     earliest_common_date = max(
         src.index.min().date(),
         tgt.index.min().date(), 
@@ -170,6 +170,15 @@ if auto_start:
                 f"to ensure all three tickers have data throughout the analysis period.")
         
         # Reload data with the adjusted start date
+        src = load_prices(source_ticker, str(earliest_common_date), str(end_date))
+        tgt = load_prices(target_ticker, str(earliest_common_date), str(end_date))
+        cmp = load_prices(comparison_ticker, str(earliest_common_date), str(end_date))
+    else:
+        # The selected start date is already after the earliest common date, so we can extend back
+        st.info(f"📅 Extending analysis period back to {earliest_common_date} "
+                f"to maximize data coverage for all three tickers.")
+        
+        # Reload data with the earliest possible start date
         src = load_prices(source_ticker, str(earliest_common_date), str(end_date))
         tgt = load_prices(target_ticker, str(earliest_common_date), str(end_date))
         cmp = load_prices(comparison_ticker, str(earliest_common_date), str(end_date))
