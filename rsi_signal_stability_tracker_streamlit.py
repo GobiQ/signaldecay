@@ -196,8 +196,8 @@ def _clip_tails(x: pd.Series | np.ndarray, pct_each_side: float = 1.0) -> np.nda
 # -----------------------------
 st.set_page_config(page_title="RSI Signal Stability Tracker", page_icon="📈", layout="wide")
 
-st.title("📈 Cross-Asset RSI Signal Tracker")
-st.caption("Analyze how an RSI-based entry condition on one asset performs when allocating to another asset. Choose an absolute RSI threshold or a percentile that translates to a rolling RSI figure.")
+st.title("RSI Signal Decay / Persistence Analyzer")
+st.caption("Signal Stability Analysis")
 
 with st.sidebar:
     st.header("Controls")
