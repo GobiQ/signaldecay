@@ -126,6 +126,38 @@ def build_event_table(prices: pd.DataFrame, alloc_bool: pd.Series) -> pd.DataFra
     df = pd.DataFrame(rows).sort_values("end").reset_index(drop=True)
     return df
 
+def calculate_tax_adjusted_equity(strategy_returns: pd.Series, tax_rate: float) -> pd.Series:
+    """
+    Calculate tax-adjusted equity curve with year-end tax deductions.
+    Assumes taxes are paid on gains at the end of each year.
+    """
+    # Convert tax rate from percentage to decimal
+    tax_rate_decimal = tax_rate / 100.0
+    
+    # Calculate cumulative equity
+    equity = (1 + strategy_returns.fillna(0)).cumprod()
+    
+    # Apply year-end taxes
+    tax_adjusted_equity = equity.copy()
+    
+    # Group by year and apply taxes
+    for year in equity.index.year.unique():
+        year_mask = equity.index.year == year
+        year_equity = equity[year_mask]
+        
+        if len(year_equity) > 0:
+            # Calculate gain for the year (from start of year)
+            year_start_equity = year_equity.iloc[0]
+            year_end_equity = year_equity.iloc[-1]
+            year_gain = year_end_equity - year_start_equity
+            
+            if year_gain > 0:  # Only tax gains, not losses
+                tax_amount = year_gain * tax_rate_decimal
+                # Apply tax at year-end
+                tax_adjusted_equity.loc[year_mask] = year_equity - tax_amount
+    
+    return tax_adjusted_equity
+
 def _sanitize_for_plot(df: pd.DataFrame) -> pd.DataFrame:
     """Ensure no tz, no object numerics, drop non-finite."""
     if not df.index.tz is None:
@@ -238,6 +270,11 @@ with st.sidebar:
 
     build_equity = st.checkbox("Show simple equity curve (long when condition true)", value=False,
                               help="Display equity curves comparing the switching strategy (target vs comparison) against buy-and-hold benchmarks. Shows cumulative performance over time.")
+    
+    if build_equity:
+        tax_rate = st.number_input("Yearly tax rate (%)", min_value=0.0, max_value=50.0, value=20.0, step=0.5,
+                                  help="Capital gains tax rate applied at year-end rebalancing. 20% is typical for long-term capital gains.")
+    
     download_switch = st.checkbox("Enable CSV download of results", value=True,
                                  help="Allow downloading the analysis results as a CSV file containing all calculated values (RSI, signals, returns, etc.) for further analysis.")
 
@@ -532,9 +569,13 @@ with col1:
 
         eq_strat = (1 + strat_ret).cumprod()
         eq_cmp = (1 + pd.Series(ret_cmp, index=prices.index).fillna(0)).cumprod()
+        
+        # Calculate tax-adjusted strategy
+        eq_strat_tax = calculate_tax_adjusted_equity(strat_ret, tax_rate)
 
         eq_df = pd.DataFrame({
             'Strategy': eq_strat,
+            f'Strategy (Tax {tax_rate:.0f}%)': eq_strat_tax,
             f'Buy&Hold {comparison_ticker}': eq_cmp
         })
 
