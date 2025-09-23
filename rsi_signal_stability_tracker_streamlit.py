@@ -247,7 +247,7 @@ def nw_bandwidth(n: int) -> int:
 st.set_page_config(page_title="Signal Decay", page_icon="📈", layout="wide")
 
 st.title("Signal Decay")
-st.caption("Signal Stability Analysis")
+st.caption("RSI Signal Statistics")
 
 with st.sidebar:
     st.header("Controls")
@@ -259,20 +259,6 @@ with st.sidebar:
     comparison_ticker = st.text_input("Fallback ticker (held when signal condition is FALSE)", value="BIL", 
                                      help="The ticker you hold when the RSI signal condition is FALSE. This is your alternative allocation (e.g., cash, bonds, or another asset).").strip().upper()
     
-    today = date.today()
-    default_start = date(today.year-8, 1, 1)  # ~8 years by default
-    
-    auto_start = st.checkbox("Auto-adjust start date to earliest common date", value=True, 
-                            help="Automatically set start date to the earliest date where all three tickers have data. This ensures maximum historical coverage for your analysis.")
-    
-    if auto_start:
-        st.info("📅 Start date will be automatically adjusted to the earliest common date for all tickers.")
-        start_date = st.date_input("Start date (will be auto-adjusted)", value=default_start, max_value=today - timedelta(days=1), disabled=True)
-    else:
-        start_date = st.date_input("Start date", value=default_start, max_value=today - timedelta(days=1))
-    
-    end_date = st.date_input("End date", value=today)
-
     rsi_len = st.number_input("RSI Days", min_value=2, max_value=200, value=10, step=1,
                              help="Number of periods used to calculate RSI. Shorter periods (10-14) are more sensitive to recent price changes, while longer periods (20-30) are smoother and less noisy.")
 
@@ -323,6 +309,20 @@ with st.sidebar:
 
     operator = st.radio("Condition", options=["RSI ≤ threshold", "RSI ≥ threshold"], index=1,
                        help="RSI ≤ threshold: Signal triggers when RSI is at or below threshold (oversold/mean reversion). RSI ≥ threshold: Signal triggers when RSI is at or above threshold (overbought/momentum).")
+    
+    today = date.today()
+    default_start = date(today.year-8, 1, 1)  # ~8 years by default
+    
+    auto_start = st.checkbox("Auto-adjust start date to earliest common date", value=True, 
+                            help="Automatically set start date to the earliest date where all three tickers have data. This ensures maximum historical coverage for your analysis.")
+    
+    if auto_start:
+        st.info("📅 Start date will be automatically adjusted to the earliest common date for all tickers.")
+        start_date = st.date_input("Start date (will be auto-adjusted)", value=default_start, max_value=today - timedelta(days=1), disabled=True)
+    else:
+        start_date = st.date_input("Start date", value=default_start, max_value=today - timedelta(days=1))
+    
+    end_date = st.date_input("End date", value=today)
 
     edge_mode = st.radio(
         "Edge mode",
@@ -588,6 +588,60 @@ else:
 col1, col2 = st.columns([2, 1], gap="large")
 
 with col1:
+    # Win Rate Chart
+    st.subheader("Win Rate")
+
+    if edge_mode == "Fixed horizon (days)":
+        wr_df = prices[['rolling_wr']].copy()
+        wr_df['rolling_wr'] = pd.to_numeric(wr_df['rolling_wr'], errors='coerce')
+        wr_df = wr_df.replace([np.inf, -np.inf], np.nan).dropna()
+
+        if wr_df.empty:
+            st.info("Not enough data to plot win rate.")
+        else:
+            fig_wr = go.Figure()
+            fig_wr.add_trace(go.Scatter(
+                x=wr_df.index, y=wr_df['rolling_wr'], mode='lines', name='Rolling win rate'
+            ))
+
+            if show_wr_baseline and prices['event_ret'].notna().any():
+                baseline_wr = float((prices['event_ret'] > win_thresh).mean())
+                fig_wr.add_hline(y=baseline_wr, line=dict(dash='dash'),
+                                 annotation_text=f"Baseline {baseline_wr:.1%}")
+
+            fig_wr.update_layout(
+                margin=dict(l=10, r=10, t=10, b=10), height=300,
+                xaxis_title='Date', yaxis_title='Win rate', yaxis=dict(range=[0, 1])
+            )
+            st.plotly_chart(fig_wr, use_container_width=True)
+
+    else:
+        # Event-based win rate (x = event end date)
+        if event_df is None or event_df.empty or 'rolling_event_wr' not in event_df:
+            st.info("Not enough events to plot win rate.")
+        else:
+            ewr = event_df[['end','rolling_event_wr']].dropna()
+            if ewr.empty:
+                st.info("Not enough events to plot win rate.")
+            else:
+                fig_wr = go.Figure()
+                fig_wr.add_trace(go.Scatter(
+                    x=ewr['end'], y=ewr['rolling_event_wr'], mode='lines+markers',
+                    name=f'Rolling win rate (last {events_window} events)'
+                ))
+
+                if show_wr_baseline:
+                    base_ev_wr = float(event_df['is_win'].mean()) if 'is_win' in event_df else np.nan
+                    if np.isfinite(base_ev_wr):
+                        fig_wr.add_hline(y=base_ev_wr, line=dict(dash='dash'),
+                                         annotation_text=f"Baseline {base_ev_wr:.1%}")
+
+                fig_wr.update_layout(
+                    margin=dict(l=10, r=10, t=10, b=10), height=300,
+                    xaxis_title='Event end date', yaxis_title='Win rate', yaxis=dict(range=[0, 1])
+                )
+                st.plotly_chart(fig_wr, use_container_width=True)
+
     st.subheader("Signal Edge")
     st.caption(edge_mode_note)
 
@@ -681,60 +735,6 @@ with col1:
                 }))
             else:
                 st.info("No events to display.")
-
-    # Win Rate Chart
-    st.subheader("Win Rate")
-
-    if edge_mode == "Fixed horizon (days)":
-        wr_df = prices[['rolling_wr']].copy()
-        wr_df['rolling_wr'] = pd.to_numeric(wr_df['rolling_wr'], errors='coerce')
-        wr_df = wr_df.replace([np.inf, -np.inf], np.nan).dropna()
-
-        if wr_df.empty:
-            st.info("Not enough data to plot win rate.")
-        else:
-            fig_wr = go.Figure()
-            fig_wr.add_trace(go.Scatter(
-                x=wr_df.index, y=wr_df['rolling_wr'], mode='lines', name='Rolling win rate'
-            ))
-
-            if show_wr_baseline and prices['event_ret'].notna().any():
-                baseline_wr = float((prices['event_ret'] > win_thresh).mean())
-                fig_wr.add_hline(y=baseline_wr, line=dict(dash='dash'),
-                                 annotation_text=f"Baseline {baseline_wr:.1%}")
-
-            fig_wr.update_layout(
-                margin=dict(l=10, r=10, t=10, b=10), height=300,
-                xaxis_title='Date', yaxis_title='Win rate', yaxis=dict(range=[0, 1])
-            )
-            st.plotly_chart(fig_wr, use_container_width=True)
-
-    else:
-        # Event-based win rate (x = event end date)
-        if event_df is None or event_df.empty or 'rolling_event_wr' not in event_df:
-            st.info("Not enough events to plot win rate.")
-        else:
-            ewr = event_df[['end','rolling_event_wr']].dropna()
-            if ewr.empty:
-                st.info("Not enough events to plot win rate.")
-            else:
-                fig_wr = go.Figure()
-                fig_wr.add_trace(go.Scatter(
-                    x=ewr['end'], y=ewr['rolling_event_wr'], mode='lines+markers',
-                    name=f'Rolling win rate (last {events_window} events)'
-                ))
-
-                if show_wr_baseline:
-                    base_ev_wr = float(event_df['is_win'].mean()) if 'is_win' in event_df else np.nan
-                    if np.isfinite(base_ev_wr):
-                        fig_wr.add_hline(y=base_ev_wr, line=dict(dash='dash'),
-                                         annotation_text=f"Baseline {base_ev_wr:.1%}")
-
-                fig_wr.update_layout(
-                    margin=dict(l=10, r=10, t=10, b=10), height=300,
-                    xaxis_title='Event end date', yaxis_title='Win rate', yaxis=dict(range=[0, 1])
-                )
-                st.plotly_chart(fig_wr, use_container_width=True)
 
     if build_equity:
         st.subheader("Equity Curve: Target vs Comparison")
@@ -1291,7 +1291,7 @@ st.markdown(
     """
     <div style="text-align: center; color: #666666; font-size: 14px; margin-top: 20px; padding: 10px;">
         <strong>RSI Threshold Validation Tool #2</strong><br>
-        Questions? Reach out to @Gobi on Discord
+        Questions? Reach out to Gobi on Discord
     </div>
     """, 
     unsafe_allow_html=True
