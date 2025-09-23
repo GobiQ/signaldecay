@@ -372,7 +372,6 @@ prices = prices.join(cmp_renamed, how="inner")
 prices['rsi'] = compute_rsi(prices['close_src'], rsi_len)
 prices['fwd_ret'] = forward_return(prices['close_tgt'], horizon)
 prices['fwd_ret_cmp'] = forward_return(prices['close_cmp'], horizon)
-prices['event_excess'] = np.where(prices['signal'], prices['fwd_ret'] - prices['fwd_ret_cmp'], np.nan)
 
 # Compute threshold line (absolute or percentile-based)
 if signal_mode == "Absolute RSI":
@@ -417,6 +416,9 @@ else:
 # Optional: suppress signals before percentile threshold is defined (rolling case)
 if signal_mode != "Absolute RSI" and perc_scope == "Rolling (windowed)":
     prices.loc[prices['rsi_thresh'].isna(), 'signal'] = False
+
+# Calculate excess returns (target minus comparison) for signal events
+prices['event_excess'] = np.where(prices['signal'], prices['fwd_ret'] - prices['fwd_ret_cmp'], np.nan)
 
 # EOD decision at t -> allocated on day t+1
 alloc_bool = prices['signal'].shift(1).fillna(False).astype(bool)
