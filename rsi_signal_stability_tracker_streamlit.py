@@ -213,7 +213,7 @@ with st.sidebar:
         st.info("📅 Start date will be automatically adjusted to the earliest common date for all tickers.")
         start_date = st.date_input("Start date (will be auto-adjusted)", value=default_start, max_value=today - timedelta(days=1), disabled=True)
     else:
-        start_date = st.date_input("Start date", value=default_start, max_value=today - timedelta(days=1))
+    start_date = st.date_input("Start date", value=default_start, max_value=today - timedelta(days=1))
     
     end_date = st.date_input("End date", value=today)
 
@@ -230,19 +230,19 @@ with st.sidebar:
     if signal_mode == "Absolute RSI":
         rsi_threshold_input = st.text_input(
             "RSI threshold",
-            value="30.0",
-            help="Fixed RSI threshold for signal generation. Values below 30 are considered oversold, above 70 are overbought. Enter as decimal (e.g., 30.5)"
+            value="80.0",
+            help="Fixed RSI threshold for signal generation. Values below 30 are considered oversold, above 70 are overbought. Enter as decimal (e.g., 80.5)"
         )
         
         # Convert text input to float with validation
         try:
             rsi_threshold = float(rsi_threshold_input)
             if rsi_threshold < 0.0 or rsi_threshold > 100.0:
-                st.warning("RSI threshold must be between 0.0 and 100.0. Using 30.0 as default.")
-                rsi_threshold = 30.0
+                st.warning("RSI threshold must be between 0.0 and 100.0. Using 80.0 as default.")
+                rsi_threshold = 80.0
         except ValueError:
-            st.warning("Invalid RSI threshold format. Using 30.0 as default.")
-            rsi_threshold = 30.0
+            st.warning("Invalid RSI threshold format. Using 80.0 as default.")
+            rsi_threshold = 80.0
         perc_scope = None
         percentile = None
         perc_window = None
@@ -350,8 +350,8 @@ if auto_start:
         st.stop()
     if cmp.empty:
         st.error(f"No data for comparison ticker: {comparison_ticker}")
-        st.stop()
-    
+    st.stop()
+
     # Find the earliest common date where all three tickers have data
     earliest_common_date = max(
         src.index.min().date(),
@@ -459,7 +459,7 @@ alloc_bool = prices['signal'].shift(1).fillna(False).astype(bool)
 
 if edge_mode == "Fixed horizon (days)":
     # Same behavior as before
-    prices['event_ret'] = np.where(prices['signal'], prices['fwd_ret'], np.nan)
+prices['event_ret'] = np.where(prices['signal'], prices['fwd_ret'], np.nan)
     # Use selected edge flavor
     series_for_edge = prices['event_excess'] if edge_flavor == "Excess vs comparison" else prices['event_ret']
     prices['rolling_edge'] = rolling_signal_edge(
@@ -529,11 +529,11 @@ with col1:
 
     if edge_mode == "Fixed horizon (days)":
         # --- existing rolling-edge (calendar window) plot ---
-        plot_df = prices[['rolling_edge']].copy()
+    plot_df = prices[['rolling_edge']].copy()
         plot_df['rolling_edge'] = pd.to_numeric(plot_df['rolling_edge'], errors='coerce')
         plot_df = plot_df.replace([np.inf, -np.inf], np.nan)
 
-        if plot_df.empty:
+    if plot_df.empty:
             st.info("No data available to plot.")
         else:
             dates = plot_df.index.to_pydatetime()
@@ -599,7 +599,7 @@ with col1:
                     autosize=True,
                     width=None  # Let it use full container width
                 )
-                st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
 
         # Optional: show an event table preview
         with st.expander("Per-event table (entry→exit)"):
@@ -892,24 +892,24 @@ with col2:
         else:
             st.info("No events detected")
     else:
-        st.subheader("Summary")
-        st.metric("Total events", f"{total_events}")
-        st.metric("Valid rolling-edge points", f"{valid_edge_points}")
-        st.metric(f"Median rolling edge ({horizon}D fwd)", f"{edge_median:.4%}" if pd.notna(edge_median) else "—")
-        st.metric(f"Mean rolling edge ({horizon}D fwd)", f"{edge_mean:.4%}" if pd.notna(edge_mean) else "—")
+    st.subheader("Summary")
+    st.metric("Total events", f"{total_events}")
+    st.metric("Valid rolling-edge points", f"{valid_edge_points}")
+    st.metric(f"Median rolling edge ({horizon}D fwd)", f"{edge_median:.4%}" if pd.notna(edge_median) else "—")
+    st.metric(f"Mean rolling edge ({horizon}D fwd)", f"{edge_mean:.4%}" if pd.notna(edge_mean) else "—")
         st.metric("Time in market (1y avg)", f"{prices['time_in_market'].iloc[-1]:.1%}" if prices['time_in_market'].notna().any() else "—")
 
     if edge_mode != "Trade-to-exit (event-based)":
-        st.markdown("---")
-        st.markdown("**Event vs Non-Event (full sample)**")
-        st.write({
-            "Events (N)": int(len(evt)),
-            "Non-events (N)": int(len(nonevt)),
-            f"Mean evt {horizon}D fwd": f"{evt.mean():.4%}" if len(evt) else "—",
-            f"Mean nonevt {horizon}D fwd": f"{nonevt.mean():.4%}" if len(nonevt) else "—",
-            "Welch t-stat": None if np.isnan(t_stat) else float(t_stat),
-            "p-value": None if np.isnan(p_val) else float(p_val),
-        })
+    st.markdown("---")
+    st.markdown("**Event vs Non-Event (full sample)**")
+    st.write({
+        "Events (N)": int(len(evt)),
+        "Non-events (N)": int(len(nonevt)),
+        f"Mean evt {horizon}D fwd": f"{evt.mean():.4%}" if len(evt) else "—",
+        f"Mean nonevt {horizon}D fwd": f"{nonevt.mean():.4%}" if len(nonevt) else "—",
+        "Welch t-stat": None if np.isnan(t_stat) else float(t_stat),
+        "p-value": None if np.isnan(p_val) else float(p_val),
+    })
 
     st.markdown("---")
     st.markdown("**Threshold reference**")
@@ -941,7 +941,7 @@ with col2:
                     st.info("No win rate data to plot")
             except Exception as e:
                 st.info(f"Win rate plot unavailable: {str(e)}")
-        else:
+    else:
             st.info("No win rate data available")
 
 # -----------------------------
