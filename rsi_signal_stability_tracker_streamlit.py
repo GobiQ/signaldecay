@@ -1009,12 +1009,13 @@ with col2:
                     mu = float(ev.mean())
                     nz = int((ev != 0).sum())
                     s_pos = int((ev > 0).sum())
+                    
                     p_sign = stats.binomtest(s_pos, nz, p=0.5, alternative='greater').pvalue
                     
                     if p_sign < 0.05:
                         st.success("✅ **Significant edge** (median > 0)")
                     else:
-                        st.warning("⚠️ **No statistically significant edge** (median ≤ 0)")
+                        st.warning(f"⚠️ **No statistically significant edge** (p={p_sign:.3f}, need p<0.05)")
                 else:
                     st.info("Not enough events to test significance")
         else:
@@ -1043,7 +1044,9 @@ with col2:
             if (np.isfinite(p_hac) and p_hac < 0.05) and (lo_wr > 0.5):
                 st.success("✅ **Significant edge** (mean > 0 & WR > 50%)")
             else:
-                st.warning("⚠️ **No statistically significant edge** (insufficient evidence)")
+                p_display = f"p={p_hac:.3f}" if np.isfinite(p_hac) else "p=NaN"
+                wr_display = f"WR CI=[{lo_wr:.1%}, {hi_wr:.1%}]"
+                st.warning(f"⚠️ **No statistically significant edge** ({p_display}, {wr_display})")
         else:
             st.info("Not enough events to test significance")
 
