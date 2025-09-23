@@ -323,30 +323,30 @@ with col1:
     st.subheader("Rolling Signal Edge (mean forward return on event dates)")
     st.caption("Oscillating line around 0 indicates changing edge over time. Positive values suggest the condition tended to precede gains over the chosen horizon.")
 
+    # Always show the full date range, even with NaN values
     plot_df = prices[['rolling_edge']].copy()
-    # Clean all non-finite & enforce numeric
+    # Clean all non-finite & enforce numeric, but keep NaN values for full date range
     plot_df['rolling_edge'] = pd.to_numeric(plot_df['rolling_edge'], errors='coerce')
-    plot_df = _sanitize_for_plot(plot_df)
+    # Replace infs with NaN but don't drop rows
+    plot_df = plot_df.replace([np.inf, -np.inf], np.nan)
 
     # Debug: Check what's in the plot data
     st.write("🔍 **Debug - Plot data:**")
     st.write(f"- Original rolling_edge shape: {prices['rolling_edge'].shape}")
     st.write(f"- Original rolling_edge date range: {prices['rolling_edge'].index.min().date()} to {prices['rolling_edge'].index.max().date()}")
     st.write(f"- Non-null rolling_edge count: {prices['rolling_edge'].notna().sum()}")
-    st.write(f"- After sanitization shape: {plot_df.shape}")
-    st.write(f"- After sanitization date range: {plot_df.index.min().date()} to {plot_df.index.max().date()}")
-    st.write(f"- First few non-null rolling_edge values:")
-    st.dataframe(prices['rolling_edge'].dropna().head(10))
+    st.write(f"- Plot data shape: {plot_df.shape}")
+    st.write(f"- Plot data date range: {plot_df.index.min().date()} to {plot_df.index.max().date()}")
 
-    if plot_df.empty or plot_df['rolling_edge'].size < 2:
-        st.info("Not enough clean data points to plot the rolling edge.\n"
-                "Try reducing min events, shortening horizon, or extending the date range.")
+    if plot_df.empty:
+        st.info("No data available to plot.")
     else:
         # Build via graph_objects (avoid PX's dataframe coercion path)
         dates = plot_df.index.to_pydatetime()
         vals = plot_df['rolling_edge'].to_numpy(dtype=float)
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=dates, y=vals, mode='lines', name='Rolling edge'))
+        fig.add_trace(go.Scatter(x=dates, y=vals, mode='lines', name='Rolling edge', 
+                                connectgaps=False))  # Don't connect gaps where data is NaN
         fig.update_layout(
             margin=dict(l=10, r=10, t=10, b=10),
             height=420,
