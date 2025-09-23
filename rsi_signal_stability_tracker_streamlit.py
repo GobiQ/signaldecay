@@ -1016,7 +1016,7 @@ with col2:
                     else:
                         st.warning("⚠️ **No statistically significant edge** (median ≤ 0)")
                 else:
-                    st.info("Not enough events to test")
+                    st.info("Not enough events to test significance")
         else:
             st.info("No events detected")
     else:
@@ -1045,7 +1045,7 @@ with col2:
             else:
                 st.warning("⚠️ **No statistically significant edge** (insufficient evidence)")
         else:
-            st.info("Not enough events to test")
+            st.info("Not enough events to test significance")
 
     if edge_mode != "Trade-to-exit (event-based)":
         st.markdown("---")
