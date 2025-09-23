@@ -359,24 +359,55 @@ with col1:
                 line=dict(color='blue', width=2)
             ))
         
-        # Add trace for NaN periods (dotted line at y=0 to indicate "no data")
+        # Add shaded regions for NaN periods to indicate "insufficient data"
         nan_mask = np.isnan(vals)
         if nan_mask.any():
-            fig.add_trace(go.Scatter(
-                x=dates[nan_mask], 
-                y=np.zeros(nan_mask.sum()), 
-                mode='lines', 
-                name='Insufficient data (no edge calculated)',
-                line=dict(color='lightgray', width=1, dash='dot'),
-                opacity=0.6
-            ))
+            # Find consecutive NaN periods and add them as shaded regions
+            nan_indices = np.where(nan_mask)[0]
+            if len(nan_indices) > 0:
+                # Group consecutive NaN periods
+                groups = []
+                current_group = [nan_indices[0]]
+                
+                for i in range(1, len(nan_indices)):
+                    if nan_indices[i] == nan_indices[i-1] + 1:
+                        current_group.append(nan_indices[i])
+                    else:
+                        groups.append(current_group)
+                        current_group = [nan_indices[i]]
+                groups.append(current_group)
+                
+                # Add shaded regions for each group
+                for group in groups:
+                    if len(group) > 1:  # Only shade regions with multiple consecutive NaN values
+                        start_date = dates[group[0]]
+                        end_date = dates[group[-1]]
+                        fig.add_vrect(
+                            x0=start_date, x1=end_date,
+                            fillcolor="lightgray", opacity=0.2,
+                            layer="below", line_width=0,
+                            annotation_text="Insufficient data", 
+                            annotation_position="top left"
+                        )
         
         fig.update_layout(
             margin=dict(l=10, r=10, t=10, b=10),
             height=420,
             xaxis_title='Date',
             yaxis_title=f'Rolling mean of {horizon}D fwd returns (on {target_ticker})',
-            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
+            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+            # Stretch x-axis across full width for granular analysis
+            xaxis=dict(
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='lightgray',
+                showline=True,
+                linewidth=1,
+                linecolor='black'
+            ),
+            # Optimize for wide display
+            autosize=True,
+            width=None  # Let it use full container width
         )
         st.plotly_chart(fig, use_container_width=True)
 
@@ -414,7 +445,19 @@ with col1:
                 margin=dict(l=10, r=10, t=30, b=10),
                 height=420,
                 xaxis_title='Date',
-                yaxis_title='Equity (normalized)'
+                yaxis_title='Equity (normalized)',
+                # Stretch x-axis across full width for granular analysis
+                xaxis=dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='lightgray',
+                    showline=True,
+                    linewidth=1,
+                    linecolor='black'
+                ),
+                # Optimize for wide display
+                autosize=True,
+                width=None  # Let it use full container width
             )
             st.plotly_chart(fig, use_container_width=True)
 
