@@ -217,7 +217,7 @@ with st.sidebar:
     
     end_date = st.date_input("End date", value=today)
 
-    rsi_len = st.number_input("RSI length", min_value=2, max_value=200, value=80, step=1,
+    rsi_len = st.number_input("RSI length", min_value=2, max_value=200, value=10, step=1,
                              help="Number of periods used to calculate RSI. Shorter periods (10-14) are more sensitive to recent price changes, while longer periods (20-30) are smoother and less noisy.")
 
     signal_mode = st.radio(
@@ -364,8 +364,7 @@ if auto_start:
     start_date = earliest_common_date
     
     # Always reload with the earliest common date to maximize data coverage
-    st.info(f"📅 **Analysis period: {start_date} to {end_date}** "
-            f"(extended from selected {original_start_date} to maximize data coverage for all three tickers)")
+    st.info(f"📅 **Analysis period: {start_date} to {end_date}**")
     
     # Reload data with the earliest possible start date
     src = load_prices(source_ticker, str(start_date), str(end_date))
