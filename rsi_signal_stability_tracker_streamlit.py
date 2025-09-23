@@ -189,6 +189,40 @@ def _clip_tails(x: pd.Series | np.ndarray, pct_each_side: float = 1.0) -> np.nda
     lo, hi = np.nanpercentile(x, [pct_each_side, 100 - pct_each_side])
     return x.clip(lo, hi).to_numpy()
 
+def hac_mean_test(x: pd.Series | np.ndarray, max_lag: int = 0):
+    """
+    Newey-West (HAC) test for mean(x)=0; returns (mean, t_stat, p_value).
+    max_lag typically = horizon-1 when using overlapping forward returns.
+    """
+    v = pd.Series(x).dropna().astype(float).values
+    n = v.size
+    if n < 3:
+        return np.nan, np.nan, np.nan
+    mu = v.mean()
+    vc = v - mu
+
+    # long-run variance (LRV) estimate
+    gamma0 = np.dot(vc, vc) / n
+    lrv = gamma0
+    for lag in range(1, max(0, int(max_lag)) + 1):
+        w = 1.0 - lag / (max_lag + 1.0)  # Bartlett kernel
+        cov = np.dot(vc[:-lag], vc[lag:]) / n
+        lrv += 2.0 * w * cov
+
+    se = np.sqrt(lrv / n) if lrv > 0 else np.nan
+    t = mu / se if se and se > 0 else np.nan
+    # Normal approx is fine for large-ish n
+    p = 2.0 * (1.0 - stats.norm.cdf(abs(t))) if np.isfinite(t) else np.nan
+    return mu, t, p
+
+def binom_ci(k: int, n: int, alpha: float = 0.05):
+    """Clopper–Pearson (exact) CI for binomial proportion."""
+    if n == 0:
+        return np.nan, np.nan
+    lo = stats.beta.ppf(alpha/2, k, n-k+1) if k > 0 else 0.0
+    hi = stats.beta.ppf(1-alpha/2, k+1, n-k) if k < n else 1.0
+    return lo, hi
+
 # -----------------------------
 # UI
 # -----------------------------
@@ -200,11 +234,11 @@ st.caption("Signal Stability Analysis")
 with st.sidebar:
     st.header("Controls")
     
-    source_ticker = st.text_input("Source ticker (for RSI signal)", value="SPY", 
+    source_ticker = st.text_input("Signal ticker (for RSI signal)", value="SPY", 
                                  help="The ticker used to calculate RSI and generate trading signals. This is where the RSI condition is evaluated.").strip().upper()
     target_ticker = st.text_input("Target ticker (to allocate / measure returns)", value="UVXY", 
                                  help="The ticker you allocate to when the RSI signal condition is TRUE. This is what you buy when the signal triggers.").strip().upper()
-    comparison_ticker = st.text_input("Comparison ticker (held when signal condition is FALSE)", value="BIL", 
+    comparison_ticker = st.text_input("Fallback ticker (held when signal condition is FALSE)", value="BIL", 
                                      help="The ticker you hold when the RSI signal condition is FALSE. This is your alternative allocation (e.g., cash, bonds, or another asset).").strip().upper()
     
     today = date.today()
@@ -221,7 +255,7 @@ with st.sidebar:
     
     end_date = st.date_input("End date", value=today)
 
-    rsi_len = st.number_input("RSI length", min_value=2, max_value=200, value=10, step=1,
+    rsi_len = st.number_input("RSI Days", min_value=2, max_value=200, value=10, step=1,
                              help="Number of periods used to calculate RSI. Shorter periods (10-14) are more sensitive to recent price changes, while longer periods (20-30) are smoother and less noisy.")
 
     signal_mode = st.radio(
@@ -1003,6 +1037,85 @@ with col2:
     else:
         # For event-based mode, win rate is already shown in the Event-Based Summary above
         pass
+
+# -----------------------------
+# Statistical significance
+# -----------------------------
+with st.expander("Statistical significance", expanded=False):
+    if edge_mode == "Fixed horizon (days)":
+        # Pick the series being tested (aligned to entry!):
+        if edge_flavor == "Excess vs comparison":
+            ev = prices.loc[prices['signal'], 'event_excess'].dropna()
+            label = f"{horizon}D excess (target − {comparison_ticker})"
+        else:
+            ev = prices.loc[prices['signal'], 'fwd_ret_entry'].dropna()
+            label = f"{horizon}D forward return ({target_ticker})"
+
+        n = int(ev.size)
+        if n >= min_ev:
+            L = max(0, int(horizon) - 1)  # overlap adjustment
+            mu, t_hac, p_hac = hac_mean_test(ev, L)
+
+            # Win-rate (vs > win_thresh). Null = 50% by default (simple, conservative).
+            k = int((ev > win_thresh).sum())
+            p_binom = stats.binomtest(k, n, p=0.5, alternative='greater').pvalue
+            lo_wr, hi_wr = binom_ci(k, n, 0.05)
+            wr = k / n
+
+            st.write({
+                "Metric": label,
+                "N events": n,
+                "Mean": f"{mu:.4%}" if np.isfinite(mu) else "—",
+                "HAC t-stat": None if not np.isfinite(t_hac) else float(t_hac),
+                "HAC p-value (two-sided)": None if not np.isfinite(p_hac) else float(p_hac),
+                "Win rate (> threshold)": f"{wr:.1%}",
+                "Win rate 95% CI": f"[{lo_wr:.1%}, {hi_wr:.1%}]",
+                "Binomial p (WR>50%)": float(p_binom),
+            })
+
+            if (np.isfinite(p_hac) and p_hac < 0.05) and (lo_wr > 0.5):
+                st.success("Significant at 5%: mean > 0 (HAC) **and** win-rate CI > 50%.")
+            else:
+                st.info("Not jointly significant at 5%; interpret with caution.")
+        else:
+            st.info("Not enough events to test.")
+
+    else:
+        # Event-based mode (per-event, non-overlapping but still may be dependent)
+        if event_df is None or event_df.empty:
+            st.info("No events to test.")
+        else:
+            ev = (event_df["excess"]
+                  if "excess" in event_df.columns else event_df["ret_tgt"]).dropna()
+            n = int(ev.size)
+            if n >= min_ev:
+                mu = float(ev.mean())
+                # Robust sign test vs 0
+                nz = int((ev != 0).sum())
+                s_pos = int((ev > 0).sum())
+                p_sign = stats.binomtest(s_pos, nz, p=0.5, alternative='greater').pvalue
+
+                st.write({
+                    "Metric": "Per-event excess" if "excess" in event_df else "Per-event target return",
+                    "N events": n,
+                    "Mean": f"{mu:.4%}",
+                    "Sign test p (median>0)": float(p_sign),
+                })
+
+                if p_sign < 0.05:
+                    st.success("Median > 0 at 5% (sign test).")
+                else:
+                    st.info("Median not > 0 at 5% (sign test).")
+            else:
+                st.info("Not enough events to test.")
+
+    # Guardrails notes
+    st.caption("""
+    **Notes**: Overlap: when horizon > 1, event samples overlap → we use HAC (Newey-West) with lag = horizon-1. 
+    Small-N: CIs will be wide; require a minimum min_ev. 
+    Multiple parameters: if users sweep many tickers/thresholds, p-values are optimistic. 
+    Consider noting "results are exploratory; adjust for multiple testing" (e.g., Bonferroni/FDR).
+    """)
 
 # -----------------------------
 # Data table & downloads
