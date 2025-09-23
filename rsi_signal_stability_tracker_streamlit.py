@@ -181,16 +181,20 @@ if auto_start:
     )
     
     st.write(f"📅 **Earliest common date: {earliest_common_date}**")
-    st.write(f"📅 **Selected start date: {start_date}**")
+    st.write(f"📅 **Original selected start date: {start_date}**")
+    
+    # Update start_date to reflect the actual date being used
+    original_start_date = start_date
+    start_date = earliest_common_date
     
     # Always reload with the earliest common date to maximize data coverage
-    st.info(f"📅 **Analysis period: {earliest_common_date} to {end_date}** "
-            f"(extended from selected {start_date} to maximize data coverage for all three tickers)")
+    st.info(f"📅 **Analysis period: {start_date} to {end_date}** "
+            f"(extended from selected {original_start_date} to maximize data coverage for all three tickers)")
     
     # Reload data with the earliest possible start date
-    src = load_prices(source_ticker, str(earliest_common_date), str(end_date))
-    tgt = load_prices(target_ticker, str(earliest_common_date), str(end_date))
-    cmp = load_prices(comparison_ticker, str(earliest_common_date), str(end_date))
+    src = load_prices(source_ticker, str(start_date), str(end_date))
+    tgt = load_prices(target_ticker, str(start_date), str(end_date))
+    cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
 else:
     # Load all three tickers with user's selected start date
     src = load_prices(source_ticker, str(start_date), str(end_date))
