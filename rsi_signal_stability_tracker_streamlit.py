@@ -209,6 +209,7 @@ def hac_mean_test(x: pd.Series | np.ndarray, max_lag: int = 0):
         cov = np.dot(vc[:-lag], vc[lag:]) / n
         lrv += 2.0 * w * cov
 
+    lrv = max(lrv, 0.0)  # Ensure non-negative
     se = np.sqrt(lrv / n) if lrv > 0 else np.nan
     t = mu / se if se and se > 0 else np.nan
     # Normal approx is fine for large-ish n
@@ -222,6 +223,23 @@ def binom_ci(k: int, n: int, alpha: float = 0.05):
     lo = stats.beta.ppf(alpha/2, k, n-k+1) if k > 0 else 0.0
     hi = stats.beta.ppf(1-alpha/2, k+1, n-k) if k < n else 1.0
     return lo, hi
+
+def non_overlapping_mask(signal_bool: pd.Series, horizon: int) -> pd.Series:
+    """Create mask for non-overlapping events with minimum horizon spacing."""
+    idx = np.where(signal_bool.values)[0]
+    keep = []
+    last = -10**9
+    for i in idx:
+        if i >= last + horizon:
+            keep.append(i)
+            last = i
+    mask = np.zeros(signal_bool.size, dtype=bool)
+    mask[keep] = True
+    return pd.Series(mask, index=signal_bool.index)
+
+def nw_bandwidth(n: int) -> int:
+    """Newey-West bandwidth rule of thumb."""
+    return int(np.clip(np.floor(4*((n/100.0)**(2/9))), 1, max(1, n-1)))
 
 # -----------------------------
 # UI
@@ -994,9 +1012,9 @@ with col2:
                     p_sign = stats.binomtest(s_pos, nz, p=0.5, alternative='greater').pvalue
                     
                     if p_sign < 0.05:
-                        st.success("✅ **Significant** (median > 0)")
+                        st.success("✅ **Significant edge** (median > 0)")
                     else:
-                        st.warning("⚠️ **Not significant** (median ≤ 0)")
+                        st.warning("⚠️ **No statistically significant edge** (median ≤ 0)")
                 else:
                     st.info("Not enough events to test")
         else:
@@ -1023,9 +1041,9 @@ with col2:
             lo_wr, hi_wr = binom_ci(k, n, 0.05)
             
             if (np.isfinite(p_hac) and p_hac < 0.05) and (lo_wr > 0.5):
-                st.success("✅ **Significant** (mean > 0 & WR > 50%)")
+                st.success("✅ **Significant edge** (mean > 0 & WR > 50%)")
             else:
-                st.warning("⚠️ **Not significant** (insufficient evidence)")
+                st.warning("⚠️ **No statistically significant edge** (insufficient evidence)")
         else:
             st.info("Not enough events to test")
 
@@ -1079,18 +1097,42 @@ with col2:
 # Statistical significance
 # -----------------------------
 with st.expander("Statistical significance", expanded=False):
+    # Advanced testing options
+    use_non_overlap = st.checkbox("Use non-overlapping events for significance", value=False,
+                                 help="Enforces minimum horizon spacing between events to avoid overlap bias")
+    use_auto_bandwidth = st.checkbox("Use automatic HAC bandwidth", value=False,
+                                    help="Uses Newey-West rule of thumb instead of horizon-1")
+    use_monte_carlo = st.checkbox("Monte Carlo (date-rotation) p-value", value=False,
+                                 help="Robust test using random date rotations (500 simulations)")
+    
     if edge_mode == "Fixed horizon (days)":
         # Pick the series being tested (aligned to entry!):
         if edge_flavor == "Excess vs comparison":
-            ev = prices.loc[prices['signal'], 'event_excess'].dropna()
+            base_ev = prices.loc[prices['signal'], 'event_excess'].dropna()
             label = f"{horizon}D excess (target − {comparison_ticker})"
         else:
-            ev = prices.loc[prices['signal'], 'fwd_ret_entry'].dropna()
+            base_ev = prices.loc[prices['signal'], 'fwd_ret_entry'].dropna()
             label = f"{horizon}D forward return ({target_ticker})"
+
+        # Apply non-overlapping filter if requested
+        if use_non_overlap:
+            ev_mask = non_overlapping_mask(prices['signal'], horizon)
+            if edge_flavor == "Excess vs comparison":
+                ev = prices.loc[ev_mask, 'event_excess'].dropna()
+            else:
+                ev = prices.loc[ev_mask, 'fwd_ret_entry'].dropna()
+            label += " (non-overlapping)"
+        else:
+            ev = base_ev
 
         n = int(ev.size)
         if n >= min_ev:
-            L = max(0, int(horizon) - 1)  # overlap adjustment
+            # HAC bandwidth selection
+            if use_auto_bandwidth:
+                L = max(horizon-1, nw_bandwidth(n))
+            else:
+                L = max(0, int(horizon) - 1)
+            
             mu, t_hac, p_hac = hac_mean_test(ev, L)
 
             # Win-rate (vs > win_thresh). Null = 50% by default (simple, conservative).
@@ -1099,7 +1141,7 @@ with st.expander("Statistical significance", expanded=False):
             lo_wr, hi_wr = binom_ci(k, n, 0.05)
             wr = k / n
 
-            st.write({
+            results = {
                 "Metric": label,
                 "N events": n,
                 "Mean": f"{mu:.4%}" if np.isfinite(mu) else "—",
@@ -1108,9 +1150,36 @@ with st.expander("Statistical significance", expanded=False):
                 "Win rate (> threshold)": f"{wr:.1%}",
                 "Win rate 95% CI": f"[{lo_wr:.1%}, {hi_wr:.1%}]",
                 "Binomial p (WR>50%)": float(p_binom),
-            })
+            }
 
-            if (np.isfinite(p_hac) and p_hac < 0.05) and (lo_wr > 0.5):
+            # Monte Carlo test if requested
+            if use_monte_carlo:
+                rng = np.random.default_rng(0)
+                m = 500  # simulations
+                obs = ev.mean()
+                sims = []
+                mask = prices['signal'].values
+                r = (prices['fwd_ret_entry'].values if edge_flavor != "Excess vs comparison"
+                     else (prices['fwd_ret_entry'] - prices['fwd_ret_cmp_entry']).values)
+                
+                for _ in range(m):
+                    k_rot = rng.integers(0, len(mask))
+                    mask_rot = np.roll(mask, k_rot)
+                    vals = r[mask_rot]
+                    sims.append(np.nanmean(vals))
+                
+                p_mc = (np.sum(np.array(sims) >= obs) + 1) / (m + 1)
+                results["Monte Carlo p (mean > 0)"] = float(p_mc)
+
+            st.write(results)
+
+            # Significance determination
+            if use_monte_carlo and "Monte Carlo p (mean > 0)" in results:
+                if p_mc < 0.05:
+                    st.success("Significant at 5%: Monte Carlo test shows edge.")
+                else:
+                    st.info("Not significant at 5%: Monte Carlo test.")
+            elif (np.isfinite(p_hac) and p_hac < 0.05) and (lo_wr > 0.5):
                 st.success("Significant at 5%: mean > 0 (HAC) **and** win-rate CI > 50%.")
             else:
                 st.info("Not jointly significant at 5%; interpret with caution.")
@@ -1146,12 +1215,16 @@ with st.expander("Statistical significance", expanded=False):
             else:
                 st.info("Not enough events to test.")
 
-    # Guardrails notes
+    # Enhanced guardrails notes
     st.caption("""
-    **Notes**: Overlap: when horizon > 1, event samples overlap → we use HAC (Newey-West) with lag = horizon-1. 
-    Small-N: CIs will be wide; require a minimum min_ev. 
-    Multiple parameters: if users sweep many tickers/thresholds, p-values are optimistic. 
-    Consider noting "results are exploratory; adjust for multiple testing" (e.g., Bonferroni/FDR).
+    **Notes**: 
+    - **Overlap**: When horizon > 1, event samples overlap → we use HAC (Newey-West). 
+    - **Non-overlapping**: Enforces minimum horizon spacing between events (loses N but gains validity).
+    - **Auto bandwidth**: Uses Newey-West rule of thumb for HAC lag selection.
+    - **Monte Carlo**: Robust test using random date rotations (handles autocorrelation/regime clustering).
+    - **Small-N**: CIs will be wide; require a minimum min_ev. 
+    - **Multiple testing**: If users sweep many tickers/thresholds, p-values are optimistic. 
+    - **Results are exploratory**: Consider adjusting for multiple testing (Bonferroni/FDR).
     """)
 
 # -----------------------------
@@ -1204,3 +1277,7 @@ st.markdown(
     - *Equity curve* goes long on day _t+1_ if the signal is true at _t_ (to avoid look-ahead bias).
     """
 )
+
+# Footer
+st.markdown("---")
+st.markdown("**RSI Threshold Validation Tool #2**  \nQuestions? Reach out to Gobi on Discord")
