@@ -88,11 +88,17 @@ with st.sidebar:
     
     today = date.today()
     default_start = date(today.year-8, 1, 1)  # ~8 years by default
-    start_date = st.date_input("Start date", value=default_start, max_value=today - timedelta(days=1))
-    end_date = st.date_input("End date", value=today)
     
     auto_start = st.checkbox("Auto-adjust start date to earliest common date", value=True, 
                             help="Automatically set start date to the earliest date where all three tickers have data")
+    
+    if auto_start:
+        st.info("📅 Start date will be automatically adjusted to the earliest common date for all tickers.")
+        start_date = st.date_input("Start date (will be auto-adjusted)", value=default_start, max_value=today - timedelta(days=1), disabled=True)
+    else:
+        start_date = st.date_input("Start date", value=default_start, max_value=today - timedelta(days=1))
+    
+    end_date = st.date_input("End date", value=today)
 
     rsi_len = st.number_input("RSI length", min_value=2, max_value=200, value=14, step=1)
 
@@ -178,8 +184,8 @@ if auto_start:
     st.write(f"📅 **Selected start date: {start_date}**")
     
     # Always reload with the earliest common date to maximize data coverage
-    st.info(f"📅 Extending analysis period back to {earliest_common_date} "
-            f"to maximize data coverage for all three tickers.")
+    st.info(f"📅 **Analysis period: {earliest_common_date} to {end_date}** "
+            f"(extended from selected {start_date} to maximize data coverage for all three tickers)")
     
     # Reload data with the earliest possible start date
     src = load_prices(source_ticker, str(earliest_common_date), str(end_date))
