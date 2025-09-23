@@ -226,6 +226,14 @@ cmp_renamed = cmp.rename(columns={'close': 'close_cmp'})
 prices = src_renamed.join(tgt_renamed, how="inner")
 prices = prices.join(cmp_renamed, how="inner")
 
+# Debug: Check the final joined dataset
+st.write("🔍 **Debug - Final joined dataset:**")
+st.write(f"- Shape: {prices.shape}")
+st.write(f"- Date range: {prices.index.min().date()} to {prices.index.max().date()}")
+st.write(f"- Columns: {prices.columns.tolist()}")
+st.write(f"- First few rows:")
+st.dataframe(prices.head())
+
 prices['rsi'] = compute_rsi(prices['close_src'], rsi_len)
 prices['fwd_ret'] = forward_return(prices['close_tgt'], horizon)
 
