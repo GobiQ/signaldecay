@@ -273,7 +273,7 @@ with st.sidebar:
     
     if build_equity:
         tax_rate = st.number_input("Yearly tax rate (%)", min_value=0.0, max_value=50.0, value=20.0, step=0.5,
-                                  help="Capital gains tax rate applied at year-end rebalancing. 20% is typical for long-term capital gains.")
+                                  help="Capital gains tax rate applied at year-end rebalancing.")
     
     download_switch = st.checkbox("Enable CSV download of results", value=True,
                                  help="Allow downloading the analysis results as a CSV file containing all calculated values (RSI, signals, returns, etc.) for further analysis.")
@@ -690,7 +690,8 @@ with st.expander("Show data / download"):
     st.dataframe(out.tail(1000))
 
     if download_switch:
-        csv = out.to_csv(index=True).encode('utf-8')
+        # Use full dataset for CSV download, not just the displayed tail(1000)
+        csv = prices[show_cols].to_csv(index=True).encode('utf-8')
         st.download_button(
             label="Download CSV",
             data=csv,
