@@ -680,25 +680,29 @@ with col1:
     if build_equity:
         st.subheader("Equity Curve: Target vs Comparison")
 
-        # Daily returns (adjusted close pct changes) - ensure 1D arrays
-        ret_tgt = prices['close_tgt'].pct_change().values.flatten()
-        ret_cmp = prices['close_cmp'].pct_change().values.flatten()
-
-        # EOD decision at t-1 → hold on day t (truly boolean allocation)
-        alloc_bool = prices['signal'].shift(1).fillna(False).to_numpy(dtype=bool)
-        strat_ret = np.where(alloc_bool, ret_tgt, ret_cmp)
-        strat_ret = pd.Series(strat_ret, index=prices.index).fillna(0.0)
-
-        eq_strat = (1 + strat_ret).cumprod()
-        eq_cmp = (1 + pd.Series(ret_cmp, index=prices.index).fillna(0)).cumprod()
+        # --- Equity Curve: Target vs Comparison (with taxes) ---
         
-        # Calculate tax-adjusted strategy
+        # Daily returns (adjusted close pct changes)
+        ret_tgt_s = pd.Series(prices['close_tgt'].pct_change(), index=prices.index).fillna(0.0)
+        ret_cmp_s = pd.Series(prices['close_cmp'].pct_change(), index=prices.index).fillna(0.0)
+
+        # EOD decision at t-1 → hold on day t
+        alloc_bool = prices['signal'].shift(1).fillna(False).to_numpy(dtype=bool)
+        strat_ret = pd.Series(np.where(alloc_bool, ret_tgt_s.values, ret_cmp_s.values), index=prices.index)
+
+        # Pre-tax equity
+        eq_strat = (1 + strat_ret).cumprod()
+        eq_cmp   = (1 + ret_cmp_s).cumprod()
+
+        # Tax-adjust both the strategy and the baseline
         eq_strat_tax = calculate_tax_adjusted_equity(strat_ret, tax_rate)
+        eq_cmp_tax   = calculate_tax_adjusted_equity(ret_cmp_s, tax_rate)
 
         eq_df = pd.DataFrame({
-            'Strategy': eq_strat,
+            'Strategy (pre-tax)': eq_strat,
             f'Strategy (Tax {tax_rate:.0f}%)': eq_strat_tax,
-            f'Buy&Hold {comparison_ticker}': eq_cmp
+            f'Buy&Hold {comparison_ticker} (pre-tax)': eq_cmp,
+            f'Buy&Hold {comparison_ticker} (Tax {tax_rate:.0f}%)': eq_cmp_tax
         })
 
         eq_df = _sanitize_for_plot(eq_df)
@@ -720,25 +724,16 @@ with col1:
                     last_day = year_data.index[-1]
                     # Convert to datetime string for Plotly compatibility
                     last_day_str = last_day.strftime('%Y-%m-%d')
-                    fig.add_vline(x=last_day_str, line_dash="dot", line_color="red")
+                    fig.add_vline(x=last_day_str, line_dash="dot", line_color="red", opacity=0.1)
             
             fig.update_layout(
                 margin=dict(l=10, r=10, t=30, b=10),
                 height=420,
                 xaxis_title='Date',
                 yaxis_title='Equity (normalized)',
-                # Stretch x-axis across full width for granular analysis
-                xaxis=dict(
-                    showgrid=True,
-                    gridwidth=1,
-                    gridcolor='lightgray',
-                    showline=True,
-                    linewidth=1,
-                    linecolor='black'
-                ),
-                # Optimize for wide display
+                xaxis=dict(showgrid=True, gridwidth=1, gridcolor='lightgray', showline=True, linewidth=1, linecolor='black'),
                 autosize=True,
-                width=None  # Let it use full container width
+                width=None
             )
             st.plotly_chart(fig, use_container_width=True)
 
