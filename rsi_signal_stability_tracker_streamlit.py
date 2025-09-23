@@ -414,27 +414,19 @@ with col1:
     if build_equity:
         st.subheader("Equity Curve: Target vs Comparison")
 
-        # Daily returns (adjusted close pct changes)
-        ret_tgt = prices['close_tgt'].pct_change()
-        ret_cmp = prices['close_cmp'].pct_change()
+        # Daily returns (adjusted close pct changes) - ensure 1D arrays
+        ret_tgt = prices['close_tgt'].pct_change().values.flatten()
+        ret_cmp = prices['close_cmp'].pct_change().values.flatten()
 
         # When condition is true → take target returns, else comparison
         strat_ret = np.where(prices['signal'].shift(1), ret_tgt, ret_cmp)  # shift(1) = trade next day
         
-        # Debug: Check shapes and types
-        st.write("🔍 **Debug - Equity curve data shapes:**")
-        st.write(f"- prices.index length: {len(prices.index)}")
-        st.write(f"- strat_ret shape: {strat_ret.shape}")
-        st.write(f"- strat_ret type: {type(strat_ret)}")
-        st.write(f"- ret_tgt shape: {ret_tgt.shape}")
-        st.write(f"- ret_cmp shape: {ret_cmp.shape}")
-        
-        # Ensure strat_ret is 1-dimensional and properly aligned with index
+        # Create Series with proper index alignment
         strat_ret = pd.Series(strat_ret, index=prices.index).fillna(0)
 
         eq_strat = (1 + strat_ret).cumprod()
-        eq_tgt = (1 + ret_tgt.fillna(0)).cumprod()
-        eq_cmp = (1 + ret_cmp.fillna(0)).cumprod()
+        eq_tgt = (1 + pd.Series(ret_tgt, index=prices.index).fillna(0)).cumprod()
+        eq_cmp = (1 + pd.Series(ret_cmp, index=prices.index).fillna(0)).cumprod()
 
         eq_df = pd.DataFrame({
             'Strategy': eq_strat,
