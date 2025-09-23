@@ -518,8 +518,8 @@ with col1:
         st.subheader("Equity Curve: Target vs Comparison")
 
         # Daily returns (adjusted close pct changes) - ensure 1D arrays
-        ret_tgt = prices['close_tgt'].pct_change().values
-        ret_cmp = prices['close_cmp'].pct_change().values
+        ret_tgt = prices['close_tgt'].pct_change().values.flatten()
+        ret_cmp = prices['close_cmp'].pct_change().values.flatten()
 
         # EOD decision at t-1 → hold on day t (truly boolean allocation)
         alloc_bool = prices['signal'].shift(1).fillna(False).to_numpy(dtype=bool)
