@@ -941,7 +941,8 @@ with col2:
             except Exception as e:
                 st.info(f"Win rate plot unavailable: {str(e)}")
     else:
-            st.info("No win rate data available")
+        # For event-based mode, win rate is already shown in the Event-Based Summary above
+        pass
 
 # -----------------------------
 # Data table & downloads
