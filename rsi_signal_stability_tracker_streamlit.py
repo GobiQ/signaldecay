@@ -6,9 +6,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import plotly.graph_objects as go
-import warnings
 from datetime import date, timedelta
 import yfinance as yf
 from scipy import stats
@@ -29,7 +27,7 @@ def compute_rsi(close: pd.Series, length: int = 14) -> pd.Series:
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=24*3600, show_spinner=False)
 def load_prices(ticker: str, start: str, end: str) -> pd.DataFrame:
     df = yf.download(ticker, start=start, end=end, auto_adjust=True, progress=False)
     if df.empty:
@@ -203,11 +201,11 @@ with st.sidebar:
     st.header("Controls")
     
     source_ticker = st.text_input("Source ticker (for RSI signal)", value="SPY", 
-                                 help="The ticker used to calculate RSI and generate trading signals. This is where the RSI condition is evaluated.")
+                                 help="The ticker used to calculate RSI and generate trading signals. This is where the RSI condition is evaluated.").strip().upper()
     target_ticker = st.text_input("Target ticker (to allocate / measure returns)", value="UVXY", 
-                                 help="The ticker you allocate to when the RSI signal condition is TRUE. This is what you buy when the signal triggers.")
+                                 help="The ticker you allocate to when the RSI signal condition is TRUE. This is what you buy when the signal triggers.").strip().upper()
     comparison_ticker = st.text_input("Comparison ticker (held when signal condition is FALSE)", value="BIL", 
-                                     help="The ticker you hold when the RSI signal condition is FALSE. This is your alternative allocation (e.g., cash, bonds, or another asset).")
+                                     help="The ticker you hold when the RSI signal condition is FALSE. This is your alternative allocation (e.g., cash, bonds, or another asset).").strip().upper()
     
     today = date.today()
     default_start = date(today.year-8, 1, 1)  # ~8 years by default
@@ -407,10 +405,19 @@ cmp_renamed = cmp.rename(columns={'close': 'close_cmp'})
 prices = src_renamed.join(tgt_renamed, how="inner")
 prices = prices.join(cmp_renamed, how="inner")
 
+# Data summary banner
+st.success(f"📊 **Data loaded successfully**: {len(prices)} trading days from {prices.index[0].strftime('%Y-%m-%d')} to {prices.index[-1].strftime('%Y-%m-%d')}")
+
 
 prices['rsi'] = compute_rsi(prices['close_src'], rsi_len)
-prices['fwd_ret'] = forward_return(prices['close_tgt'], horizon)
-prices['fwd_ret_cmp'] = forward_return(prices['close_cmp'], horizon)
+
+# Forward returns aligned to entry day (t+1) to match equity curve logic
+fwd_ret_raw = forward_return(prices['close_tgt'], horizon)
+fwd_ret_cmp_raw = forward_return(prices['close_cmp'], horizon)
+prices['fwd_ret'] = fwd_ret_raw  # Keep original for backward compatibility
+prices['fwd_ret_cmp'] = fwd_ret_cmp_raw  # Keep original for backward compatibility
+prices['fwd_ret_entry'] = fwd_ret_raw.shift(-1)  # Entry-aligned for event metrics
+prices['fwd_ret_cmp_entry'] = fwd_ret_cmp_raw.shift(-1)  # Entry-aligned for event metrics
 
 # Compute threshold line (absolute or percentile-based)
 if signal_mode == "Absolute RSI":
@@ -456,15 +463,15 @@ else:
 if signal_mode != "Absolute RSI" and perc_scope == "Rolling (windowed)":
     prices.loc[prices['rsi_thresh'].isna(), 'signal'] = False
 
-# Calculate excess returns (target minus comparison) for signal events
-prices['event_excess'] = np.where(prices['signal'], prices['fwd_ret'] - prices['fwd_ret_cmp'], np.nan)
+# Calculate excess returns (target minus comparison) for signal events - entry-aligned
+prices['event_excess'] = np.where(prices['signal'], prices['fwd_ret_entry'] - prices['fwd_ret_cmp_entry'], np.nan)
 
 # EOD decision at t -> allocated on day t+1
 alloc_bool = prices['signal'].shift(1).fillna(False).astype(bool)
 
 if edge_mode == "Fixed horizon (days)":
-    # Same behavior as before
-    prices['event_ret'] = np.where(prices['signal'], prices['fwd_ret'], np.nan)
+    # Entry-aligned event returns
+    prices['event_ret'] = np.where(prices['signal'], prices['fwd_ret_entry'], np.nan)
     # Use selected edge flavor
     series_for_edge = prices['event_excess'] if edge_flavor == "Excess vs comparison" else prices['event_ret']
     prices['rolling_edge'] = rolling_signal_edge(
@@ -774,13 +781,13 @@ with col1:
 
     # Build series for the chosen metric
     if edge_mode == "Fixed horizon (days)":
-        # Event samples
+        # Event samples - entry-aligned
         if "forward return" in dist_metric:
-            event_vals = prices.loc[prices['signal'], 'fwd_ret']
-            base_vals  = prices['fwd_ret']  # all days baseline
+            event_vals = prices.loc[prices['signal'], 'fwd_ret_entry']
+            base_vals  = prices['fwd_ret_entry']  # all days baseline, aligned to actual entry day
             x_label = f"{horizon}D forward return (target: {target_ticker})"
         else:
-            all_excess = prices['fwd_ret'] - prices['fwd_ret_cmp']
+            all_excess = prices['fwd_ret_entry'] - prices['fwd_ret_cmp_entry']
             event_vals = prices.loc[prices['signal'], 'event_excess']
             base_vals  = all_excess
             x_label = f"{horizon}D excess return (target − {comparison_ticker})"
