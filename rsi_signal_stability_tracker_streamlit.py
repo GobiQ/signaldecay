@@ -82,15 +82,18 @@ st.caption("Analyze how an RSI-based entry condition on one asset performs when 
 with st.sidebar:
     st.header("Controls")
     
-    source_ticker = st.text_input("Source ticker (for RSI signal)", value="SPY")
-    target_ticker = st.text_input("Target ticker (to allocate / measure returns)", value="UVXY")
-    comparison_ticker = st.text_input("Comparison ticker (held when signal condition is FALSE)", value="BIL")
+    source_ticker = st.text_input("Source ticker (for RSI signal)", value="SPY", 
+                                 help="The ticker used to calculate RSI and generate trading signals. This is where the RSI condition is evaluated.")
+    target_ticker = st.text_input("Target ticker (to allocate / measure returns)", value="UVXY", 
+                                 help="The ticker you allocate to when the RSI signal condition is TRUE. This is what you buy when the signal triggers.")
+    comparison_ticker = st.text_input("Comparison ticker (held when signal condition is FALSE)", value="BIL", 
+                                     help="The ticker you hold when the RSI signal condition is FALSE. This is your alternative allocation (e.g., cash, bonds, or another asset).")
     
     today = date.today()
     default_start = date(today.year-8, 1, 1)  # ~8 years by default
     
     auto_start = st.checkbox("Auto-adjust start date to earliest common date", value=True, 
-                            help="Automatically set start date to the earliest date where all three tickers have data")
+                            help="Automatically set start date to the earliest date where all three tickers have data. This ensures maximum historical coverage for your analysis.")
     
     if auto_start:
         st.info("📅 Start date will be automatically adjusted to the earliest common date for all tickers.")
@@ -100,21 +103,25 @@ with st.sidebar:
     
     end_date = st.date_input("End date", value=today)
 
-    rsi_len = st.number_input("RSI length", min_value=2, max_value=200, value=14, step=1)
+    rsi_len = st.number_input("RSI length", min_value=2, max_value=200, value=10, step=1,
+                             help="Number of periods used to calculate RSI. Shorter periods (10-14) are more sensitive to recent price changes, while longer periods (20-30) are smoother and less noisy.")
 
     signal_mode = st.radio(
         "Signal type",
         options=["Absolute RSI", "Percentile RSI → RSI figure"],
-        index=0
+        index=0,
+        help="Absolute RSI: Use a fixed RSI threshold (e.g., 30 or 70). Percentile RSI: Use a dynamic threshold based on historical RSI percentiles (adapts to market conditions)."
     )
 
     if signal_mode == "Absolute RSI":
-        rsi_threshold = st.slider("RSI threshold", min_value=0.0, max_value=100.0, value=30.0, step=0.5)
+        rsi_threshold = st.slider("RSI threshold", min_value=0.0, max_value=100.0, value=30.0, step=0.5,
+                                 help="Fixed RSI threshold for signal generation. Values below 30 are considered oversold, above 70 are overbought. Choose based on your strategy (mean reversion vs momentum).")
         perc_scope = None
         percentile = None
         perc_window = None
     else:
-        percentile = st.slider("Percentile (0–100)", min_value=0.0, max_value=100.0, value=90.0, step=0.5)
+        percentile = st.slider("Percentile (0–100)", min_value=0.0, max_value=100.0, value=90.0, step=0.5,
+                              help="Percentile threshold for dynamic RSI calculation. 90th percentile means the signal triggers when RSI is in the top 10% of historical values. Higher percentiles = more selective signals.")
         perc_scope = st.radio(
             "Percentile scope",
             options=["Whole dataset (fixed)", "Rolling (windowed)"],
@@ -125,19 +132,26 @@ with st.sidebar:
         if perc_scope == "Rolling (windowed)":
             perc_window = st.number_input(
                 "Rolling window (trading days)",
-                min_value=30, max_value=1260, value=252, step=1
+                min_value=30, max_value=1260, value=252, step=1,
+                help="Number of trading days used to calculate the rolling percentile threshold. Longer windows provide more stable thresholds but adapt slower to regime changes."
             )
         else:
             perc_window = None
 
-    operator = st.radio("Condition", options=["RSI ≤ threshold", "RSI ≥ threshold"], index=0)
+    operator = st.radio("Condition", options=["RSI ≤ threshold", "RSI ≥ threshold"], index=1,
+                       help="RSI ≤ threshold: Signal triggers when RSI is at or below threshold (oversold/mean reversion). RSI ≥ threshold: Signal triggers when RSI is at or above threshold (overbought/momentum).")
 
-    horizon = st.number_input("Forward return horizon (trading days)", min_value=1, max_value=252, value=3, step=1)
-    eval_window = st.number_input("Rolling evaluation window (days)", min_value=21, max_value=1260, value=252, step=1)
-    min_ev = st.number_input("Min events in window to show edge", min_value=1, max_value=100, value=3, step=1)
+    horizon = st.number_input("Forward return horizon (trading days)", min_value=1, max_value=252, value=3, step=1,
+                             help="Number of trading days to look ahead when measuring returns. Shorter horizons (1-5 days) capture immediate effects, longer horizons (10-21 days) capture delayed effects.")
+    eval_window = st.number_input("Rolling evaluation window (days)", min_value=21, max_value=1260, value=1008, step=1,
+                                 help="Number of trading days used to calculate rolling signal edge. Longer windows provide more stable estimates but adapt slower to changing market conditions. 1008 days ≈ 4 years.")
+    min_ev = st.number_input("Min events in window to show edge", min_value=1, max_value=100, value=3, step=1,
+                            help="Minimum number of signal events required within the evaluation window to calculate rolling edge. Higher values ensure statistical significance but may create gaps in the analysis.")
 
-    build_equity = st.checkbox("Show simple equity curve (long when condition true)", value=False)
-    download_switch = st.checkbox("Enable CSV download of results", value=True)
+    build_equity = st.checkbox("Show simple equity curve (long when condition true)", value=False,
+                              help="Display equity curves comparing the switching strategy (target vs comparison) against buy-and-hold benchmarks. Shows cumulative performance over time.")
+    download_switch = st.checkbox("Enable CSV download of results", value=True,
+                                 help="Allow downloading the analysis results as a CSV file containing all calculated values (RSI, signals, returns, etc.) for further analysis.")
 
 # -----------------------------
 # Data & Signal
@@ -167,21 +181,12 @@ if auto_start:
         st.error(f"No data for comparison ticker: {comparison_ticker}")
         st.stop()
     
-    # Debug: Show the actual date ranges for each ticker
-    st.write("🔍 **Debug - Date ranges for each ticker:**")
-    st.write(f"- {source_ticker}: {src.index.min().date()} to {src.index.max().date()}")
-    st.write(f"- {target_ticker}: {tgt.index.min().date()} to {tgt.index.max().date()}")
-    st.write(f"- {comparison_ticker}: {cmp.index.min().date()} to {cmp.index.max().date()}")
-    
     # Find the earliest common date where all three tickers have data
     earliest_common_date = max(
         src.index.min().date(),
         tgt.index.min().date(), 
         cmp.index.min().date()
     )
-    
-    st.write(f"📅 **Earliest common date: {earliest_common_date}**")
-    st.write(f"📅 **Original selected start date: {start_date}**")
     
     # Update start_date to reflect the actual date being used
     original_start_date = start_date
@@ -226,13 +231,6 @@ cmp_renamed = cmp.rename(columns={'close': 'close_cmp'})
 prices = src_renamed.join(tgt_renamed, how="inner")
 prices = prices.join(cmp_renamed, how="inner")
 
-# Debug: Check the final joined dataset
-st.write("🔍 **Debug - Final joined dataset:**")
-st.write(f"- Shape: {prices.shape}")
-st.write(f"- Date range: {prices.index.min().date()} to {prices.index.max().date()}")
-st.write(f"- Columns: {prices.columns.tolist()}")
-st.write(f"- First few rows:")
-st.dataframe(prices.head())
 
 prices['rsi'] = compute_rsi(prices['close_src'], rsi_len)
 prices['fwd_ret'] = forward_return(prices['close_tgt'], horizon)
@@ -285,14 +283,6 @@ prices['event_ret'] = np.where(prices['signal'], prices['fwd_ret'], np.nan)
 # Rolling signal edge (oscillates around 0 if no edge)
 prices['rolling_edge'] = rolling_signal_edge(prices['event_ret'], window=eval_window, min_events=min_ev)
 
-# Debug: Check the rolling edge calculation (can be removed later)
-st.write("🔍 **Debug - Rolling edge calculation:**")
-st.write(f"- Total events (signal=True): {prices['signal'].sum()}")
-st.write(f"- Event returns non-null count: {prices['event_ret'].notna().sum()}")
-st.write(f"- Rolling edge non-null count: {prices['rolling_edge'].notna().sum()}")
-st.write(f"- Rolling edge date range: {prices['rolling_edge'].dropna().index.min().date()} to {prices['rolling_edge'].dropna().index.max().date()}")
-st.write(f"- Min events required: {min_ev}")
-st.write(f"- Evaluation window: {eval_window} days")
 
 # Ensure numeric dtype for computed columns
 for c in ['rsi', 'fwd_ret', 'event_ret', 'rolling_edge']:
@@ -330,17 +320,16 @@ with col1:
     # Replace infs with NaN but don't drop rows
     plot_df = plot_df.replace([np.inf, -np.inf], np.nan)
 
-    # Debug: Check what's in the plot data
-    st.write("🔍 **Debug - Plot data:**")
-    st.write(f"- Original rolling_edge shape: {prices['rolling_edge'].shape}")
-    st.write(f"- Original rolling_edge date range: {prices['rolling_edge'].index.min().date()} to {prices['rolling_edge'].index.max().date()}")
-    st.write(f"- Non-null rolling_edge count: {prices['rolling_edge'].notna().sum()}")
-    st.write(f"- Plot data shape: {plot_df.shape}")
-    st.write(f"- Plot data date range: {plot_df.index.min().date()} to {plot_df.index.max().date()}")
 
     if plot_df.empty:
         st.info("No data available to plot.")
     else:
+        # Quick diagnostic for 2025 data
+        data_2025 = plot_df[plot_df.index.year == 2025]
+        if len(data_2025) > 0:
+            st.write(f"📊 2025 data: {len(data_2025)} days, from {data_2025.index.min().date()} to {data_2025.index.max().date()}")
+        else:
+            st.write("📊 No 2025 data available in the analysis period")
         # Build via graph_objects (avoid PX's dataframe coercion path)
         dates = plot_df.index.to_pydatetime()
         vals = plot_df['rolling_edge'].to_numpy(dtype=float)
