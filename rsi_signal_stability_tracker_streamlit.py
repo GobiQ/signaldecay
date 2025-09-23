@@ -420,7 +420,8 @@ with col1:
 
         # When condition is true → take target returns, else comparison
         strat_ret = np.where(prices['signal'].shift(1), ret_tgt, ret_cmp)  # shift(1) = trade next day
-        strat_ret = pd.Series(strat_ret, index=prices.index).fillna(0)
+        # Ensure strat_ret is 1-dimensional and create Series
+        strat_ret = pd.Series(strat_ret.flatten(), index=prices.index).fillna(0)
 
         eq_strat = (1 + strat_ret).cumprod()
         eq_tgt = (1 + ret_tgt.fillna(0)).cumprod()
