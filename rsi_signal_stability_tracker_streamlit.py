@@ -174,6 +174,17 @@ def _sanitize_for_plot(df: pd.DataFrame) -> pd.DataFrame:
     df = df.dropna(how='any')
     return df
 
+def _clip_tails(x: pd.Series | np.ndarray, pct_each_side: float = 1.0) -> np.ndarray:
+    """
+    Clip extremes symmetrically for visualization (does not mutate source data).
+    pct_each_side: e.g., 1.0 -> clips below 1st and above 99th percentile.
+    """
+    x = pd.Series(x).astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+    if x.empty or pct_each_side <= 0:
+        return x.to_numpy()
+    lo, hi = np.nanpercentile(x, [pct_each_side, 100 - pct_each_side])
+    return x.clip(lo, hi).to_numpy()
+
 # -----------------------------
 # UI
 # -----------------------------
@@ -465,7 +476,7 @@ prices['time_in_market'] = prices['signal'].shift(1).fillna(False).rolling(252).
 
 
 # Ensure numeric dtype for computed columns
-for c in ['rsi', 'fwd_ret', 'event_ret', 'rolling_edge']:
+for c in ['rsi','fwd_ret','fwd_ret_cmp','event_ret','event_excess','rolling_edge','rolling_wr']:
     if c in prices.columns:
         prices[c] = pd.to_numeric(prices[c], errors='coerce')
 
@@ -690,6 +701,146 @@ with col1:
                 width=None  # Let it use full container width
             )
             st.plotly_chart(fig, use_container_width=True)
+
+    # Return Distribution
+    st.subheader("Return Distribution")
+
+    # Config inside an expander to avoid sidebar clutter
+    with st.expander("Distribution settings", expanded=True):
+        # Choice depends on edge mode
+        if edge_mode == "Fixed horizon (days)":
+            dist_metric = st.selectbox(
+                "Metric",
+                ["Event forward return (target)", "Event excess (target − comparison)"],
+                index=0,
+                help="Forward return is over your selected horizon; 'excess' subtracts the comparison's forward return."
+            )
+            overlay_baseline = st.checkbox(
+                "Overlay baseline distribution", value=True,
+                help="Baseline = same metric on all days (not just events)."
+            )
+        else:
+            dist_metric = st.selectbox(
+                "Metric",
+                ["Per-event cumulative return (target)", "Per-event excess (target − comparison)"],
+                index=1,
+                help="Per-event = cumulative from entry to exit for each contiguous allocation."
+            )
+            overlay_baseline = False  # not applicable in event-based mode
+
+        bins = st.slider("Number of bins", min_value=20, max_value=200, value=60, step=5)
+        clip_pct = st.slider(
+            "Clip tails for visualization (each side, %)",
+            min_value=0.0, max_value=5.0, value=1.0, step=0.1,
+            help="Clips extreme tails to make the histogram readable on UVXY-like assets. Data itself is unchanged."
+        )
+
+    # Build series for the chosen metric
+    if edge_mode == "Fixed horizon (days)":
+        # Event samples
+        if "forward return" in dist_metric:
+            event_vals = prices.loc[prices['signal'], 'fwd_ret']
+            base_vals  = prices['fwd_ret']  # all days baseline
+            x_label = f"{horizon}D forward return (target: {target_ticker})"
+        else:
+            all_excess = prices['fwd_ret'] - prices['fwd_ret_cmp']
+            event_vals = prices.loc[prices['signal'], 'event_excess']
+            base_vals  = all_excess
+            x_label = f"{horizon}D excess return (target − {comparison_ticker})"
+        # Clip for display only
+        ev = _clip_tails(event_vals, clip_pct)
+        bv = _clip_tails(base_vals,  clip_pct) if overlay_baseline else None
+
+        if ev.size < 2:
+            st.info("Not enough event samples to plot a distribution. Try loosening the threshold or widening dates.")
+        else:
+            figd = go.Figure()
+            figd.add_trace(go.Histogram(
+                x=ev, name="Events", nbinsx=bins, histnorm="probability", opacity=0.75
+            ))
+            if overlay_baseline and bv is not None and bv.size > 2:
+                figd.add_trace(go.Histogram(
+                    x=bv, name="Baseline (all days)", nbinsx=bins, histnorm="probability", opacity=0.45
+                ))
+                figd.update_layout(barmode="overlay")
+
+            # Reference lines
+            ev_mean = float(np.nanmean(ev)) if ev.size else np.nan
+            figd.add_vline(x=0.0, line=dict(dash="dot"))
+            if np.isfinite(ev_mean):
+                figd.add_vline(x=ev_mean, line=dict(color="black", dash="dash"),
+                               annotation_text=f"Event mean {ev_mean:.2%}", annotation_position="top")
+
+            figd.update_layout(
+                margin=dict(l=10, r=10, t=10, b=10), height=360,
+                xaxis_title=x_label, yaxis_title="Probability"
+            )
+            st.plotly_chart(figd, use_container_width=True)
+
+            # Distribution stats
+            with st.expander("Distribution stats"):
+                def _stats(x):
+                    x = pd.Series(x).replace([np.inf,-np.inf], np.nan).dropna()
+                    if x.empty: 
+                        return {"N":0}
+                    return {
+                        "N": int(x.size),
+                        "Mean": float(np.mean(x)),
+                        "Median": float(np.median(x)),
+                        "Std": float(np.std(x, ddof=1)) if x.size>1 else np.nan,
+                        "P5": float(np.percentile(x,5)),
+                        "P95": float(np.percentile(x,95)),
+                    }
+                st.write(_stats(ev))
+                if overlay_baseline and bv is not None and bv.size>0:
+                    st.write({"Baseline": _stats(bv)})
+
+    else:
+        # Event-based mode uses event_df
+        if event_df is None or event_df.empty:
+            st.info("No events yet to plot. Adjust thresholds or date range.")
+        else:
+            if "cumulative return (target)" in dist_metric:
+                vals = event_df['ret_tgt'].to_numpy()
+                x_label = "Per-event cumulative return (target)"
+            else:
+                vals = event_df['excess'].to_numpy()
+                x_label = f"Per-event excess (target − {comparison_ticker})"
+
+            vals = _clip_tails(vals, clip_pct)
+            if vals.size < 2:
+                st.info("Not enough events to plot a distribution.")
+            else:
+                figd = go.Figure()
+                figd.add_trace(go.Histogram(
+                    x=vals, name="Events", nbinsx=bins, histnorm="probability", opacity=0.75
+                ))
+                figd.add_vline(x=0.0, line=dict(dash="dot"))
+                mean_v = float(np.nanmean(vals))
+                figd.add_vline(x=mean_v, line=dict(color="black", dash="dash"),
+                               annotation_text=f"Mean {mean_v:.2%}", annotation_position="top")
+
+                figd.update_layout(
+                    margin=dict(l=10, r=10, t=10, b=10), height=360,
+                    xaxis_title=x_label, yaxis_title="Probability"
+                )
+                st.plotly_chart(figd, use_container_width=True)
+
+                # Distribution stats
+                with st.expander("Distribution stats"):
+                    def _stats(x):
+                        x = pd.Series(x).replace([np.inf,-np.inf], np.nan).dropna()
+                        if x.empty: 
+                            return {"N":0}
+                        return {
+                            "N": int(x.size),
+                            "Mean": float(np.mean(x)),
+                            "Median": float(np.median(x)),
+                            "Std": float(np.std(x, ddof=1)) if x.size>1 else np.nan,
+                            "P5": float(np.percentile(x,5)),
+                            "P95": float(np.percentile(x,95)),
+                        }
+                    st.write(_stats(vals))
 
 with col2:
     if edge_mode == "Trade-to-exit (event-based)":
