@@ -82,6 +82,17 @@ st.caption("Analyze how an RSI-based entry condition performs over time. Choose 
 with st.sidebar:
     st.header("Controls")
     ticker = st.text_input("Ticker (Yahoo Finance)", value="SPY")
+    
+    cross_asset = st.checkbox("Cross-asset mode (signal on source, returns on target)", value=False)
+    if cross_asset:
+        source_ticker = st.text_input("Source ticker (for RSI signal)", value="SPY")
+        target_ticker = st.text_input("Target ticker (to allocate / measure returns)", value="UVXY")
+        comparison_ticker = st.text_input("Comparison ticker (held when signal condition is FALSE)", value="BIL")
+    else:
+        source_ticker = ticker
+        target_ticker = ticker
+        comparison_ticker = "BIL"  # Default to cash-like instrument
+    
     today = date.today()
     default_start = date(today.year-8, 1, 1)  # ~8 years by default
     start_date = st.date_input("Start date", value=default_start, max_value=today - timedelta(days=1))
@@ -113,16 +124,36 @@ if not ticker:
     st.warning("Enter a ticker symbol to begin.")
     st.stop()
 
-prices = load_prices(ticker, str(start_date), str(end_date))
-if prices.empty:
-    st.error("No data returned. Check ticker or date range.")
+# Load all three tickers
+src = load_prices(source_ticker, str(start_date), str(end_date))
+tgt = load_prices(target_ticker, str(start_date), str(end_date))
+cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
+
+if src.empty:
+    st.error(f"No data for source ticker: {source_ticker}")
+    st.stop()
+if tgt.empty:
+    st.error(f"No data for target ticker: {target_ticker}")
+    st.stop()
+if cmp.empty:
+    st.error(f"No data for comparison ticker: {comparison_ticker}")
     st.stop()
 
-# Ensure a clean, tz-naive DateTimeIndex for plotting
-prices.index = pd.to_datetime(prices.index).tz_localize(None)
+# Ensure tz-naive DateTimeIndex
+src.index = pd.to_datetime(src.index).tz_localize(None)
+tgt.index = pd.to_datetime(tgt.index).tz_localize(None)
+cmp.index = pd.to_datetime(cmp.index).tz_localize(None)
 
-prices['rsi'] = compute_rsi(prices['close'], rsi_len)
-prices['fwd_ret'] = forward_return(prices['close'], horizon)
+# Inner-join on trading days present in ALL series so the horizon aligns
+prices = src.join(tgt, how="inner", lsuffix="_src", rsuffix="_tgt")
+prices = prices.join(cmp, how="inner")
+prices.rename(
+    columns={"close_src": "close_src", "close_tgt": "close_tgt", "close": "close_cmp"},
+    inplace=True
+)
+
+prices['rsi'] = compute_rsi(prices['close_src'], rsi_len)
+prices['fwd_ret'] = forward_return(prices['close_tgt'], horizon)
 
 # Compute threshold line (absolute or percentile-based)
 if signal_mode == "Absolute RSI":
@@ -189,30 +220,47 @@ with col1:
             margin=dict(l=10, r=10, t=10, b=10),
             height=420,
             xaxis_title='Date',
-            yaxis_title=f'Rolling mean of {horizon}D fwd returns'
+            yaxis_title=f'Rolling mean of {horizon}D fwd returns (on {target_ticker})'
         )
         st.plotly_chart(fig, use_container_width=True)
 
     if build_equity:
-        st.subheader("Simple Equity Curve (long when condition true)")
-        # Strategy: long next-day when today's signal is true (avoid look-ahead)
-        ret = prices['close'].pct_change()
-        strat_ret = ret * prices['signal'].shift(1).fillna(False).astype(float)
-        eq = (1 + strat_ret.fillna(0)).cumprod()
-        bench = (1 + ret.fillna(0)).cumprod()
-        eq_df = pd.DataFrame({'Strategy': eq, 'Buy&Hold': bench})
+        st.subheader("Equity Curve: Target vs Comparison")
+
+        # Daily returns (adjusted close pct changes)
+        ret_tgt = prices['close_tgt'].pct_change()
+        ret_cmp = prices['close_cmp'].pct_change()
+
+        # When condition is true → take target returns, else comparison
+        strat_ret = np.where(prices['signal'].shift(1), ret_tgt, ret_cmp)  # shift(1) = trade next day
+        strat_ret = pd.Series(strat_ret, index=prices.index).fillna(0)
+
+        eq_strat = (1 + strat_ret).cumprod()
+        eq_tgt = (1 + ret_tgt.fillna(0)).cumprod()
+        eq_cmp = (1 + ret_cmp.fillna(0)).cumprod()
+
+        eq_df = pd.DataFrame({
+            'Strategy': eq_strat,
+            f'Buy&Hold {target_ticker}': eq_tgt,
+            f'Buy&Hold {comparison_ticker}': eq_cmp
+        })
+
         eq_df = _sanitize_for_plot(eq_df)
 
         if eq_df.empty or eq_df.shape[0] < 2:
-            st.info("Not enough clean data to draw the equity curve.")
+            st.info("Not enough data to draw equity curve.")
         else:
-            dates2 = eq_df.index.to_pydatetime()
-            fig2 = go.Figure()
-            fig2.add_trace(go.Scatter(x=dates2, y=eq_df['Strategy'].astype(float), mode='lines', name='Strategy'))
-            fig2.add_trace(go.Scatter(x=dates2, y=eq_df['Buy&Hold'].astype(float), mode='lines', name='Buy & Hold'))
-            fig2.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=420,
-                               xaxis_title='Date', yaxis_title='Equity (normalized)')
-            st.plotly_chart(fig2, use_container_width=True)
+            dates = eq_df.index.to_pydatetime()
+            fig = go.Figure()
+            for col in eq_df.columns:
+                fig.add_trace(go.Scatter(x=dates, y=eq_df[col], mode='lines', name=col))
+            fig.update_layout(
+                margin=dict(l=10, r=10, t=30, b=10),
+                height=420,
+                xaxis_title='Date',
+                yaxis_title='Equity (normalized)'
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
 with col2:
     st.subheader("Summary")
@@ -234,6 +282,8 @@ with col2:
 
     st.markdown("---")
     st.markdown("**Threshold reference**")
+    if cross_asset:
+        st.write(f"Signal on **{source_ticker}**, returns on **{target_ticker}**.")
     if signal_mode == "Absolute RSI":
         st.write(f"Using constant RSI threshold = **{rsi_threshold:.1f}**")
     else:
@@ -245,7 +295,11 @@ with col2:
 # Data table & downloads
 # -----------------------------
 with st.expander("Show data / download"):
-    show_cols = ['close', 'rsi', 'rsi_thresh', 'signal', 'fwd_ret', 'event_ret', 'rolling_edge']
+    show_cols = [
+        'close_src', 'close_tgt', 'close_cmp',
+        'rsi', 'rsi_thresh', 'signal',
+        'fwd_ret', 'event_ret', 'rolling_edge'
+    ]
     out = prices[show_cols].copy()
     st.dataframe(out.tail(1000))
 
