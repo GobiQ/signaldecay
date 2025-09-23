@@ -244,7 +244,7 @@ def nw_bandwidth(n: int) -> int:
 # -----------------------------
 # UI
 # -----------------------------
-st.set_page_config(page_title="RSI Signal Stability Tracker", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Signal Decay", page_icon="📈", layout="wide")
 
 st.title("Signal Decay")
 st.caption("Signal Stability Analysis")
@@ -1287,4 +1287,12 @@ st.markdown(
 
 # Footer
 st.markdown("---")
-st.markdown("**RSI Threshold Validation Tool #2**  \nQuestions? Reach out to Gobi on Discord")
+st.markdown(
+    """
+    <div style="text-align: center; color: #666666; font-size: 14px; margin-top: 20px; padding: 10px;">
+        <strong>RSI Threshold Validation Tool #2</strong><br>
+        Questions? Reach out to Gobi on Discord
+    </div>
+    """, 
+    unsafe_allow_html=True
+)
