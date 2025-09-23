@@ -1291,7 +1291,7 @@ st.markdown(
     """
     <div style="text-align: center; color: #666666; font-size: 14px; margin-top: 20px; padding: 10px;">
         <strong>RSI Threshold Validation Tool #2</strong><br>
-        Questions? Reach out to Gobi on Discord
+        Questions? Reach out to @Gobi on Discord
     </div>
     """, 
     unsafe_allow_html=True
