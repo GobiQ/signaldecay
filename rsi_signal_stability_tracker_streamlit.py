@@ -728,8 +728,9 @@ with col1:
             )
             overlay_baseline = False  # not applicable in event-based mode
 
-        bins = st.slider("Number of bins", min_value=20, max_value=200, value=60, step=5)
-        clip_pct = st.slider(
+        bins = st.number_input("Number of bins", min_value=20, max_value=200, value=60, step=5,
+                               help="Number of histogram bins for distribution visualization")
+        clip_pct = st.number_input(
             "Clip tails for visualization (each side, %)",
             min_value=0.0, max_value=5.0, value=1.0, step=0.1,
             help="Clips extreme tails to make the histogram readable on UVXY-like assets. Data itself is unchanged."
