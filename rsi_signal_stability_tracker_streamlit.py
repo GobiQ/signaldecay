@@ -140,23 +140,27 @@ if not source_ticker or not target_ticker or not comparison_ticker:
     st.warning("Enter all three ticker symbols to begin.")
     st.stop()
 
-# Load all three tickers
-src = load_prices(source_ticker, str(start_date), str(end_date))
-tgt = load_prices(target_ticker, str(start_date), str(end_date))
-cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
-
-if src.empty:
-    st.error(f"No data for source ticker: {source_ticker}")
-    st.stop()
-if tgt.empty:
-    st.error(f"No data for target ticker: {target_ticker}")
-    st.stop()
-if cmp.empty:
-    st.error(f"No data for comparison ticker: {comparison_ticker}")
-    st.stop()
-
 # Auto-adjust start date to earliest common date if requested
 if auto_start:
+    # First, try to load data from a much earlier date to find the true earliest common date
+    # Use a date far back enough to capture the earliest possible data for most tickers
+    early_start = date(1990, 1, 1)
+    
+    # Load all three tickers from the early start date
+    src = load_prices(source_ticker, str(early_start), str(end_date))
+    tgt = load_prices(target_ticker, str(early_start), str(end_date))
+    cmp = load_prices(comparison_ticker, str(early_start), str(end_date))
+    
+    if src.empty:
+        st.error(f"No data for source ticker: {source_ticker}")
+        st.stop()
+    if tgt.empty:
+        st.error(f"No data for target ticker: {target_ticker}")
+        st.stop()
+    if cmp.empty:
+        st.error(f"No data for comparison ticker: {comparison_ticker}")
+        st.stop()
+    
     # Debug: Show the actual date ranges for each ticker
     st.write("🔍 **Debug - Date ranges for each ticker:**")
     st.write(f"- {source_ticker}: {src.index.min().date()} to {src.index.max().date()}")
@@ -181,6 +185,21 @@ if auto_start:
     src = load_prices(source_ticker, str(earliest_common_date), str(end_date))
     tgt = load_prices(target_ticker, str(earliest_common_date), str(end_date))
     cmp = load_prices(comparison_ticker, str(earliest_common_date), str(end_date))
+else:
+    # Load all three tickers with user's selected start date
+    src = load_prices(source_ticker, str(start_date), str(end_date))
+    tgt = load_prices(target_ticker, str(start_date), str(end_date))
+    cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
+    
+    if src.empty:
+        st.error(f"No data for source ticker: {source_ticker}")
+        st.stop()
+    if tgt.empty:
+        st.error(f"No data for target ticker: {target_ticker}")
+        st.stop()
+    if cmp.empty:
+        st.error(f"No data for comparison ticker: {comparison_ticker}")
+        st.stop()
 
 # Ensure tz-naive DateTimeIndex
 src.index = pd.to_datetime(src.index).tz_localize(None)
