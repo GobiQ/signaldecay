@@ -770,10 +770,10 @@ with col1:
             figd.add_vline(x=0.0, line=dict(dash="dot"))
             if np.isfinite(ev_mean):
                 figd.add_vline(x=ev_mean, line=dict(color="blue", dash="dash"),
-                               annotation_text=f"Mean {ev_mean:.2%}", annotation_position="top")
+                               annotation_text=f"Mean {ev_mean:.2%}", annotation_position="top right")
             if np.isfinite(ev_median):
                 figd.add_vline(x=ev_median, line=dict(color="red", dash="dash"),
-                               annotation_text=f"Median {ev_median:.2%}", annotation_position="top")
+                               annotation_text=f"Median {ev_median:.2%}", annotation_position="top left")
 
             figd.update_layout(
                 margin=dict(l=10, r=10, t=40, b=10), height=400,
@@ -823,9 +823,9 @@ with col1:
                 mean_v = float(np.nanmean(vals))
                 median_v = float(np.nanmedian(vals))
                 figd.add_vline(x=mean_v, line=dict(color="blue", dash="dash"),
-                               annotation_text=f"Mean {mean_v:.2%}", annotation_position="top")
+                               annotation_text=f"Mean {mean_v:.2%}", annotation_position="top right")
                 figd.add_vline(x=median_v, line=dict(color="red", dash="dash"),
-                               annotation_text=f"Median {median_v:.2%}", annotation_position="top")
+                               annotation_text=f"Median {median_v:.2%}", annotation_position="top left")
 
                 figd.update_layout(
                     margin=dict(l=10, r=10, t=40, b=10), height=400,
