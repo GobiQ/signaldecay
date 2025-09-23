@@ -90,21 +90,44 @@ with st.sidebar:
     default_start = date(today.year-8, 1, 1)  # ~8 years by default
     start_date = st.date_input("Start date", value=default_start, max_value=today - timedelta(days=1))
     end_date = st.date_input("End date", value=today)
+    
+    auto_start = st.checkbox("Auto-adjust start date to earliest common date", value=True, 
+                            help="Automatically set start date to the earliest date where all three tickers have data")
 
     rsi_len = st.number_input("RSI length", min_value=2, max_value=200, value=14, step=1)
 
-    signal_mode = st.radio("Signal type", options=["Absolute RSI", "Percentile RSI → RSI figure"], index=0)
+    signal_mode = st.radio(
+        "Signal type",
+        options=["Absolute RSI", "Percentile RSI → RSI figure"],
+        index=0
+    )
 
     if signal_mode == "Absolute RSI":
         rsi_threshold = st.slider("RSI threshold", min_value=0.0, max_value=100.0, value=30.0, step=0.5)
+        perc_scope = None
+        percentile = None
+        perc_window = None
     else:
-        percentile = st.slider("Percentile threshold (0–100)", min_value=0.0, max_value=100.0, value=10.0, step=0.5)
-        perc_window = st.number_input("Percentile rolling window (trading days)", min_value=30, max_value=1260, value=252, step=1)
+        percentile = st.slider("Percentile (0–100)", min_value=0.0, max_value=100.0, value=90.0, step=0.5)
+        perc_scope = st.radio(
+            "Percentile scope",
+            options=["Whole dataset (fixed)", "Rolling (windowed)"],
+            index=0,
+            help="Whole dataset: one fixed threshold from the entire selected period. "
+                 "Rolling: threshold recomputed from the last N trading days (changes over time)."
+        )
+        if perc_scope == "Rolling (windowed)":
+            perc_window = st.number_input(
+                "Rolling window (trading days)",
+                min_value=30, max_value=1260, value=252, step=1
+            )
+        else:
+            perc_window = None
 
     operator = st.radio("Condition", options=["RSI ≤ threshold", "RSI ≥ threshold"], index=0)
 
-    horizon = st.number_input("Forward return horizon (trading days)", min_value=1, max_value=252, value=21, step=1)
-    eval_window = st.number_input("Rolling evaluation window (days)", min_value=21, max_value=1260, value=126, step=1)
+    horizon = st.number_input("Forward return horizon (trading days)", min_value=1, max_value=252, value=3, step=1)
+    eval_window = st.number_input("Rolling evaluation window (days)", min_value=21, max_value=1260, value=84, step=1)
     min_ev = st.number_input("Min events in window to show edge", min_value=1, max_value=100, value=10, step=1)
 
     build_equity = st.checkbox("Show simple equity curve (long when condition true)", value=False)
@@ -132,6 +155,25 @@ if cmp.empty:
     st.error(f"No data for comparison ticker: {comparison_ticker}")
     st.stop()
 
+# Auto-adjust start date to earliest common date if requested
+if auto_start:
+    # Find the latest start date among all three tickers
+    earliest_common_date = max(
+        src.index.min().date(),
+        tgt.index.min().date(), 
+        cmp.index.min().date()
+    )
+    
+    # If the earliest common date is later than the selected start date, adjust
+    if earliest_common_date > start_date:
+        st.info(f"📅 Auto-adjusted start date from {start_date} to {earliest_common_date} "
+                f"to ensure all three tickers have data throughout the analysis period.")
+        
+        # Reload data with the adjusted start date
+        src = load_prices(source_ticker, str(earliest_common_date), str(end_date))
+        tgt = load_prices(target_ticker, str(earliest_common_date), str(end_date))
+        cmp = load_prices(comparison_ticker, str(earliest_common_date), str(end_date))
+
 # Ensure tz-naive DateTimeIndex
 src.index = pd.to_datetime(src.index).tz_localize(None)
 tgt.index = pd.to_datetime(tgt.index).tz_localize(None)
@@ -153,14 +195,44 @@ prices['fwd_ret'] = forward_return(prices['close_tgt'], horizon)
 # Compute threshold line (absolute or percentile-based)
 if signal_mode == "Absolute RSI":
     prices['rsi_thresh'] = rsi_threshold
+    thresh_note = f"Using constant RSI threshold = **{rsi_threshold:.1f}**"
 else:
-    prices['rsi_thresh'] = rolling_percentile_threshold(prices['rsi'], window=perc_window, percentile=percentile)
+    p = np.clip(percentile / 100.0, 0.0, 1.0)
+    if perc_scope == "Whole dataset (fixed)":
+        # One fixed value from the entire selected period
+        fixed_thresh = float(prices['rsi'].quantile(p))
+        prices['rsi_thresh'] = fixed_thresh
+        thresh_note = (
+            f"**Whole dataset p{percentile:.1f}** ⇒ RSI threshold **{fixed_thresh:.2f}** "
+            "(fixed for all dates)"
+        )
+    else:
+        # Rolling window percentile
+        prices['rsi_thresh'] = rolling_percentile_threshold(
+            prices['rsi'], window=int(perc_window), percentile=percentile
+        )
+        # Show the latest available threshold value
+        last_valid_thresh = prices['rsi_thresh'].dropna().iloc[-1] if prices['rsi_thresh'].notna().any() else np.nan
+        if np.isnan(last_valid_thresh):
+            thresh_note = (
+                f"**Rolling p{percentile:.1f} over {perc_window} days** ⇒ RSI threshold varies by date; "
+                "insufficient data yet to compute a current value."
+            )
+        else:
+            thresh_note = (
+                f"**Rolling p{percentile:.1f} over {perc_window} days** ⇒ "
+                f"current RSI threshold **{last_valid_thresh:.2f}** (varies over time)"
+            )
 
 # Build boolean signal based on operator
 if "≤" in operator:
     prices['signal'] = prices['rsi'] <= prices['rsi_thresh']
 else:
     prices['signal'] = prices['rsi'] >= prices['rsi_thresh']
+
+# Optional: suppress signals before percentile threshold is defined (rolling case)
+if signal_mode != "Absolute RSI" and perc_scope == "Rolling (windowed)":
+    prices.loc[prices['rsi_thresh'].isna(), 'signal'] = False
 
 # Event returns (forward returns measured at signal dates)
 prices['event_ret'] = np.where(prices['signal'], prices['fwd_ret'], np.nan)
@@ -278,12 +350,7 @@ with col2:
     st.markdown("---")
     st.markdown("**Threshold reference**")
     st.write(f"Signal on **{source_ticker}**, returns on **{target_ticker}**.")
-    if signal_mode == "Absolute RSI":
-        st.write(f"Using constant RSI threshold = **{rsi_threshold:.1f}**")
-    else:
-        st.write(
-            f"Using **rolling percentile**: {percentile:.1f}th over {perc_window} days → daily RSI threshold varies by regime."
-        )
+    st.write(thresh_note)
 
 # -----------------------------
 # Data table & downloads
