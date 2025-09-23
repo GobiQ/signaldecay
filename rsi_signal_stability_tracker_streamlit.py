@@ -531,12 +531,10 @@ with col1:
         strat_ret = pd.Series(strat_ret, index=prices.index).fillna(0.0)
 
         eq_strat = (1 + strat_ret).cumprod()
-        eq_tgt = (1 + pd.Series(ret_tgt, index=prices.index).fillna(0)).cumprod()
         eq_cmp = (1 + pd.Series(ret_cmp, index=prices.index).fillna(0)).cumprod()
 
         eq_df = pd.DataFrame({
             'Strategy': eq_strat,
-            f'Buy&Hold {target_ticker}': eq_tgt,
             f'Buy&Hold {comparison_ticker}': eq_cmp
         })
 
@@ -570,11 +568,29 @@ with col1:
             st.plotly_chart(fig, use_container_width=True)
 
 with col2:
-    st.subheader("Summary")
-    st.metric("Total events", f"{total_events}")
-    st.metric("Valid rolling-edge points", f"{valid_edge_points}")
-    st.metric(f"Median rolling edge ({horizon}D fwd)", f"{edge_median:.4%}" if pd.notna(edge_median) else "—")
-    st.metric(f"Mean rolling edge ({horizon}D fwd)", f"{edge_mean:.4%}" if pd.notna(edge_mean) else "—")
+    if edge_mode == "Trade-to-exit (event-based)":
+        st.subheader("Event-Based Summary")
+        st.caption("Statistics for trade-to-exit mode")
+        
+        if event_df is not None and not event_df.empty:
+            total_events = len(event_df)
+            winning_events = len(event_df[event_df['excess'] > 0])
+            win_rate = winning_events / total_events if total_events > 0 else 0
+            
+            st.metric("Total events", f"{total_events}")
+            st.metric("Winning events", f"{winning_events}")
+            st.metric("Win rate", f"{win_rate:.1%}")
+            st.metric("Mean excess return", f"{event_df['excess'].mean():.2%}")
+            st.metric("Median excess return", f"{event_df['excess'].median():.2%}")
+            st.metric("Avg duration", f"{event_df['duration'].mean():.1f} days")
+        else:
+            st.info("No events detected")
+    else:
+        st.subheader("Summary")
+        st.metric("Total events", f"{total_events}")
+        st.metric("Valid rolling-edge points", f"{valid_edge_points}")
+        st.metric(f"Median rolling edge ({horizon}D fwd)", f"{edge_median:.4%}" if pd.notna(edge_median) else "—")
+        st.metric(f"Mean rolling edge ({horizon}D fwd)", f"{edge_mean:.4%}" if pd.notna(edge_mean) else "—")
 
     st.markdown("---")
     st.markdown("**Event vs Non-Event (full sample)**")
@@ -619,23 +635,6 @@ with col2:
                 st.info(f"Win rate plot unavailable: {str(e)}")
         else:
             st.info("No win rate data available")
-    else:
-        st.markdown("---")
-        st.subheader("Event-Based Stats")
-        st.caption("Statistics for trade-to-exit mode")
-        
-        if event_df is not None and not event_df.empty:
-            total_events = len(event_df)
-            winning_events = len(event_df[event_df['excess'] > 0])
-            win_rate = winning_events / total_events if total_events > 0 else 0
-            
-            st.metric("Total events", f"{total_events}")
-            st.metric("Winning events", f"{winning_events}")
-            st.metric("Win rate", f"{win_rate:.1%}")
-            st.metric("Avg excess return", f"{event_df['excess'].mean():.2%}")
-            st.metric("Avg duration", f"{event_df['duration'].mean():.1f} days")
-        else:
-            st.info("No events detected")
 
 # -----------------------------
 # Data table & downloads
