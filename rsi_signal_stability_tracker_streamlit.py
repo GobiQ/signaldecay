@@ -213,7 +213,7 @@ with st.sidebar:
         st.info("📅 Start date will be automatically adjusted to the earliest common date for all tickers.")
         start_date = st.date_input("Start date (will be auto-adjusted)", value=default_start, max_value=today - timedelta(days=1), disabled=True)
     else:
-    start_date = st.date_input("Start date", value=default_start, max_value=today - timedelta(days=1))
+        start_date = st.date_input("Start date", value=default_start, max_value=today - timedelta(days=1))
     
     end_date = st.date_input("End date", value=today)
 
