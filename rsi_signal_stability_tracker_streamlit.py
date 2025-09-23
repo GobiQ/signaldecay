@@ -314,7 +314,7 @@ with st.sidebar:
             help="Compute event-based edge as the rolling mean over the last N events."
         )
 
-    build_equity = st.checkbox("Show simple equity curve (long when condition true)", value=False,
+    build_equity = st.checkbox("Show simple equity curve (long when condition true)", value=True,
                               help="Display equity curves comparing the switching strategy (target vs comparison) against buy-and-hold benchmarks. Shows cumulative performance over time.")
     
     if build_equity:
