@@ -982,6 +982,23 @@ with col2:
             st.metric("Mean excess return", f"{event_df['excess'].mean():.2%}")
             st.metric("Median excess return", f"{event_df['excess'].median():.2%}")
             st.metric("Avg duration", f"{event_df['duration'].mean():.1f} days")
+            
+            # Statistical significance for event-based mode
+            if event_df is not None and not event_df.empty:
+                ev = (event_df["excess"] if "excess" in event_df.columns else event_df["ret_tgt"]).dropna()
+                n = int(ev.size)
+                if n >= min_ev:
+                    mu = float(ev.mean())
+                    nz = int((ev != 0).sum())
+                    s_pos = int((ev > 0).sum())
+                    p_sign = stats.binomtest(s_pos, nz, p=0.5, alternative='greater').pvalue
+                    
+                    if p_sign < 0.05:
+                        st.success("✅ **Significant** (median > 0)")
+                    else:
+                        st.warning("⚠️ **Not significant** (median ≤ 0)")
+                else:
+                    st.info("Not enough events to test")
         else:
             st.info("No events detected")
     else:
@@ -991,6 +1008,26 @@ with col2:
         st.metric(f"Median rolling edge ({horizon}D fwd)", f"{edge_median:.4%}" if pd.notna(edge_median) else "—")
         st.metric(f"Mean rolling edge ({horizon}D fwd)", f"{edge_mean:.4%}" if pd.notna(edge_mean) else "—")
         st.metric("Time in market (1y avg)", f"{prices['time_in_market'].iloc[-1]:.1%}" if prices['time_in_market'].notna().any() else "—")
+        
+        # Statistical significance for fixed-horizon mode
+        if edge_flavor == "Excess vs comparison":
+            ev = prices.loc[prices['signal'], 'event_excess'].dropna()
+        else:
+            ev = prices.loc[prices['signal'], 'fwd_ret_entry'].dropna()
+        
+        n = int(ev.size)
+        if n >= min_ev:
+            L = max(0, int(horizon) - 1)
+            mu, t_hac, p_hac = hac_mean_test(ev, L)
+            k = int((ev > win_thresh).sum())
+            lo_wr, hi_wr = binom_ci(k, n, 0.05)
+            
+            if (np.isfinite(p_hac) and p_hac < 0.05) and (lo_wr > 0.5):
+                st.success("✅ **Significant** (mean > 0 & WR > 50%)")
+            else:
+                st.warning("⚠️ **Not significant** (insufficient evidence)")
+        else:
+            st.info("Not enough events to test")
 
     if edge_mode != "Trade-to-exit (event-based)":
         st.markdown("---")
