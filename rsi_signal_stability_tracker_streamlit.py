@@ -128,35 +128,38 @@ def build_event_table(prices: pd.DataFrame, alloc_bool: pd.Series) -> pd.DataFra
 
 def calculate_tax_adjusted_equity(strategy_returns: pd.Series, tax_rate: float) -> pd.Series:
     """
-    Calculate tax-adjusted equity curve with year-end tax deductions.
-    Assumes taxes are paid on gains at the end of each year.
+    Apply year-end tax on POSITIVE yearly gains and carry forward thereafter.
+    Leaves intra-year path untouched; tax hits only on the final trading day of each year.
     """
-    # Convert tax rate from percentage to decimal
-    tax_rate_decimal = tax_rate / 100.0
-    
-    # Calculate cumulative equity
-    equity = (1 + strategy_returns.fillna(0)).cumprod()
-    
-    # Apply year-end taxes
-    tax_adjusted_equity = equity.copy()
-    
-    # Group by year and apply taxes
-    for year in equity.index.year.unique():
-        year_mask = equity.index.year == year
-        year_equity = equity[year_mask]
-        
-        if len(year_equity) > 0:
-            # Calculate gain for the year (from start of year)
-            year_start_equity = year_equity.iloc[0]
-            year_end_equity = year_equity.iloc[-1]
-            year_gain = year_end_equity - year_start_equity
-            
-            if year_gain > 0:  # Only tax gains, not losses
-                tax_amount = year_gain * tax_rate_decimal
-                # Apply tax at year-end
-                tax_adjusted_equity.loc[year_mask] = year_equity - tax_amount
-    
-    return tax_adjusted_equity
+    tax = tax_rate / 100.0
+    eq = (1 + strategy_returns.fillna(0)).cumprod().copy()
+
+    # Work year by year
+    years = eq.index.to_period("Y").unique()
+    eq_tax = eq.copy()
+    prev_year_end_level = None
+
+    for y in years:
+        mask = (eq.index.to_period("Y") == y)
+        year_eq = eq[mask]
+        if year_eq.empty:
+            continue
+
+        start_level = eq_tax[mask].iloc[0] if prev_year_end_level is None else prev_year_end_level
+        end_idx = year_eq.index[-1]
+
+        # Gain relative to start of year (after prior taxes)
+        end_level = eq_tax.loc[end_idx]
+        year_gain = end_level - start_level
+
+        if year_gain > 0:
+            tax_amt = year_gain * tax
+            # Apply only on/after the year-end day
+            eq_tax.loc[end_idx:] = eq_tax.loc[end_idx:] - tax_amt
+
+        prev_year_end_level = eq_tax.loc[end_idx]
+
+    return eq_tax
 
 def _sanitize_for_plot(df: pd.DataFrame) -> pd.DataFrame:
     """Ensure no tz, no object numerics, drop non-finite."""
@@ -249,6 +252,13 @@ with st.sidebar:
              "Trade-to-exit: score each contiguous allocation period (from entry until exit)."
     )
 
+    win_thresh = st.number_input(
+        "Win threshold (return)",
+        min_value=-0.05, max_value=0.05, value=0.0, step=0.001,
+        help="Return cutoff to count as a win (0.0 = break-even, 0.001 = +0.1%)."
+    )
+    show_wr_baseline = st.checkbox("Show baseline win rate", value=True)
+
     if edge_mode == "Fixed horizon (days)":
         horizon = st.number_input("Forward return horizon (trading days)", min_value=1, max_value=20, value=5, step=1,
                                  help="Number of trading days to look ahead when measuring returns. Shorter horizons (1-5 days) capture immediate effects, longer horizons (10-21 days) capture delayed effects.")
@@ -256,6 +266,8 @@ with st.sidebar:
                                      help="Number of trading days used to calculate rolling signal edge. Longer windows provide more stable estimates but adapt slower to changing market conditions. 63 days ≈ 3 months.")
         min_ev = st.number_input("Min events in window to show edge", min_value=1, max_value=50, value=6, step=1,
                                 help="Minimum number of signal events required within the evaluation window to calculate rolling edge. Higher values ensure statistical significance but may create gaps in the analysis.")
+        edge_flavor = st.selectbox("Edge flavor", ["Target return", "Excess vs comparison"], index=1,
+                                  help="Target return: measure absolute returns on target ticker. Excess vs comparison: measure target returns minus comparison returns (isolates pure target performance from market drift).")
     else:
         # Trade-to-exit mode - use different defaults
         horizon = 5  # Not used but needed for compatibility
@@ -359,6 +371,8 @@ prices = prices.join(cmp_renamed, how="inner")
 
 prices['rsi'] = compute_rsi(prices['close_src'], rsi_len)
 prices['fwd_ret'] = forward_return(prices['close_tgt'], horizon)
+prices['fwd_ret_cmp'] = forward_return(prices['close_cmp'], horizon)
+prices['event_excess'] = np.where(prices['signal'], prices['fwd_ret'] - prices['fwd_ret_cmp'], np.nan)
 
 # Compute threshold line (absolute or percentile-based)
 if signal_mode == "Absolute RSI":
@@ -410,8 +424,10 @@ alloc_bool = prices['signal'].shift(1).fillna(False).astype(bool)
 if edge_mode == "Fixed horizon (days)":
     # Same behavior as before
     prices['event_ret'] = np.where(prices['signal'], prices['fwd_ret'], np.nan)
+    # Use selected edge flavor
+    series_for_edge = prices['event_excess'] if edge_flavor == "Excess vs comparison" else prices['event_ret']
     prices['rolling_edge'] = rolling_signal_edge(
-        prices['event_ret'], window=eval_window, min_events=min_ev
+        series_for_edge, window=eval_window, min_events=min_ev
     )
     edge_mode_note = f"Fixed horizon edge over {eval_window} trading days; forward horizon = {horizon}."
     event_df = None
@@ -423,13 +439,19 @@ else:
         event_df["rolling_event_edge"] = (
             event_df["excess"].rolling(events_window, min_periods=min_ev).mean()
         )
+        # Event-level win (default: EXCESS > win_thresh)
+        event_df['is_win'] = (event_df['excess'] > win_thresh)
+        event_df['rolling_event_wr'] = (
+            event_df['is_win'].rolling(events_window, min_periods=min_ev).mean()
+        )
     prices['event_ret'] = np.nan   # not used in this mode
     prices['rolling_edge'] = np.nan
     edge_mode_note = f"Event-based edge over last {events_window} events (minimum {min_ev} events)."
 
-# Rolling win rate (frequency of positive returns) - only for fixed horizon mode
 if edge_mode == "Fixed horizon (days)":
-    prices['rolling_wr'] = rolling_win_rate(prices['event_ret'], eval_window, min_ev, win_threshold=0.0)
+    prices['rolling_wr'] = rolling_win_rate(
+        prices['event_ret'], window=eval_window, min_events=min_ev, win_threshold=win_thresh
+    )
 else:
     prices['rolling_wr'] = np.nan
 
@@ -486,10 +508,15 @@ with col1:
             if valid_mask.any():
                 fig.add_trace(go.Scatter(x=dates[valid_mask], y=vals[valid_mask],
                                          mode='lines', name='Rolling edge'))
+            # Dynamic y-axis label based on edge flavor
+            y_axis_label = (f'Rolling mean excess (target−{comparison_ticker}) over {horizon}D'
+                           if edge_flavor == "Excess vs comparison"
+                           else f'Rolling mean of {horizon}D fwd returns (on {target_ticker})')
+            
             fig.update_layout(
                 margin=dict(l=10, r=10, t=10, b=10), height=420,
                 xaxis_title='Date',
-                yaxis_title=f'Rolling mean of {horizon}D fwd returns (on {target_ticker})',
+                yaxis_title=y_axis_label,
                 # Stretch x-axis across full width for granular analysis
                 xaxis=dict(
                     showgrid=True,
@@ -554,6 +581,60 @@ with col1:
                 }))
             else:
                 st.info("No events to display.")
+
+    # Win Rate Chart
+    st.subheader("Win Rate")
+
+    if edge_mode == "Fixed horizon (days)":
+        wr_df = prices[['rolling_wr']].copy()
+        wr_df['rolling_wr'] = pd.to_numeric(wr_df['rolling_wr'], errors='coerce')
+        wr_df = wr_df.replace([np.inf, -np.inf], np.nan).dropna()
+
+        if wr_df.empty:
+            st.info("Not enough data to plot win rate.")
+        else:
+            fig_wr = go.Figure()
+            fig_wr.add_trace(go.Scatter(
+                x=wr_df.index, y=wr_df['rolling_wr'], mode='lines', name='Rolling win rate'
+            ))
+
+            if show_wr_baseline and prices['event_ret'].notna().any():
+                baseline_wr = float((prices['event_ret'] > win_thresh).mean())
+                fig_wr.add_hline(y=baseline_wr, line=dict(dash='dash'),
+                                 annotation_text=f"Baseline {baseline_wr:.1%}")
+
+            fig_wr.update_layout(
+                margin=dict(l=10, r=10, t=10, b=10), height=300,
+                xaxis_title='Date', yaxis_title='Win rate', yaxis=dict(range=[0, 1])
+            )
+            st.plotly_chart(fig_wr, use_container_width=True)
+
+    else:
+        # Event-based win rate (x = event end date)
+        if event_df is None or event_df.empty or 'rolling_event_wr' not in event_df:
+            st.info("Not enough events to plot win rate.")
+        else:
+            ewr = event_df[['end','rolling_event_wr']].dropna()
+            if ewr.empty:
+                st.info("Not enough events to plot win rate.")
+            else:
+                fig_wr = go.Figure()
+                fig_wr.add_trace(go.Scatter(
+                    x=ewr['end'], y=ewr['rolling_event_wr'], mode='lines+markers',
+                    name=f'Rolling win rate (last {events_window} events)'
+                ))
+
+                if show_wr_baseline:
+                    base_ev_wr = float(event_df['is_win'].mean()) if 'is_win' in event_df else np.nan
+                    if np.isfinite(base_ev_wr):
+                        fig_wr.add_hline(y=base_ev_wr, line=dict(dash='dash'),
+                                         annotation_text=f"Baseline {base_ev_wr:.1%}")
+
+                fig_wr.update_layout(
+                    margin=dict(l=10, r=10, t=10, b=10), height=300,
+                    xaxis_title='Event end date', yaxis_title='Win rate', yaxis=dict(range=[0, 1])
+                )
+                st.plotly_chart(fig_wr, use_container_width=True)
 
     if build_equity:
         st.subheader("Equity Curve: Target vs Comparison")
@@ -632,17 +713,19 @@ with col2:
         st.metric("Valid rolling-edge points", f"{valid_edge_points}")
         st.metric(f"Median rolling edge ({horizon}D fwd)", f"{edge_median:.4%}" if pd.notna(edge_median) else "—")
         st.metric(f"Mean rolling edge ({horizon}D fwd)", f"{edge_mean:.4%}" if pd.notna(edge_mean) else "—")
+        st.metric("Time in market (1y avg)", f"{prices['time_in_market'].iloc[-1]:.1%}" if prices['time_in_market'].notna().any() else "—")
 
-    st.markdown("---")
-    st.markdown("**Event vs Non-Event (full sample)**")
-    st.write({
-        "Events (N)": int(len(evt)),
-        "Non-events (N)": int(len(nonevt)),
-        f"Mean evt {horizon}D fwd": f"{evt.mean():.4%}" if len(evt) else "—",
-        f"Mean nonevt {horizon}D fwd": f"{nonevt.mean():.4%}" if len(nonevt) else "—",
-        "Welch t-stat": None if np.isnan(t_stat) else float(t_stat),
-        "p-value": None if np.isnan(p_val) else float(p_val),
-    })
+    if edge_mode != "Trade-to-exit (event-based)":
+        st.markdown("---")
+        st.markdown("**Event vs Non-Event (full sample)**")
+        st.write({
+            "Events (N)": int(len(evt)),
+            "Non-events (N)": int(len(nonevt)),
+            f"Mean evt {horizon}D fwd": f"{evt.mean():.4%}" if len(evt) else "—",
+            f"Mean nonevt {horizon}D fwd": f"{nonevt.mean():.4%}" if len(nonevt) else "—",
+            "Welch t-stat": None if np.isnan(t_stat) else float(t_stat),
+            "p-value": None if np.isnan(p_val) else float(p_val),
+        })
 
     st.markdown("---")
     st.markdown("**Threshold reference**")
