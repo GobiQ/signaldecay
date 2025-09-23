@@ -58,6 +58,74 @@ def rolling_signal_edge(event_returns: pd.Series, window: int, min_events: int =
     edge[event_counts < min_events] = np.nan
     return edge
 
+def rolling_win_rate(event_returns: pd.Series, window: int, min_events: int = 10, win_threshold: float = 0.0) -> pd.Series:
+    """Rolling win rate of forward returns *only at event dates* over a trailing window."""
+    is_event = event_returns.notna()
+    is_win = (event_returns > win_threshold) & is_event
+    wins = is_win.rolling(window, min_periods=1).sum()
+    count = is_event.rolling(window, min_periods=1).sum()
+    wr = wins / count.replace(0, np.nan)
+    wr[count < min_events] = np.nan
+    return wr
+
+def segment_true_runs(mask: pd.Series) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+    """
+    Return list of (start_date, end_date) for each contiguous True run in mask.
+    mask index must be sorted DateTimeIndex.
+    """
+    m = mask.fillna(False).astype(bool).to_numpy()
+    idx = mask.index.to_numpy()
+    runs = []
+    in_run = False
+    start = 0
+    for i, v in enumerate(m):
+        if v and not in_run:
+            start = i
+            in_run = True
+        # close the run if v flipped to False OR we're at last bar
+        last_bar = (i == len(m) - 1)
+        if in_run and (not v or last_bar):
+            end = i if v and last_bar else i - 1
+            if end >= start:
+                runs.append((pd.Timestamp(idx[start]), pd.Timestamp(idx[end])))
+            in_run = False
+    return runs
+
+def build_event_table(prices: pd.DataFrame, alloc_bool: pd.Series) -> pd.DataFrame:
+    """
+    Build per-event stats for contiguous allocation runs.
+    Returns a DataFrame with: start, end, duration, ret_tgt, ret_cmp, excess, MFE, MAE.
+    """
+    runs = segment_true_runs(alloc_bool)
+    if not runs:
+        return pd.DataFrame(columns=["start","end","duration","ret_tgt","ret_cmp","excess","MFE","MAE"])
+
+    ret_tgt = prices["close_tgt"].pct_change()
+    ret_cmp = prices["close_cmp"].pct_change()
+
+    rows = []
+    for start, end in runs:
+        seg_tgt = ret_tgt.loc[start:end]
+        seg_cmp = ret_cmp.loc[start:end]
+        # cumulative returns over the allocated days
+        cum_tgt = float((1.0 + seg_tgt.fillna(0)).prod() - 1.0)
+        cum_cmp = float((1.0 + seg_cmp.fillna(0)).prod() - 1.0)
+        excess  = cum_tgt - cum_cmp
+
+        # MFE/MAE within the event (vs entry)
+        path = (1.0 + seg_tgt.fillna(0)).cumprod()
+        mfe = float(path.max() - 1.0) if len(path) else np.nan
+        mae = float(path.min() - 1.0) if len(path) else np.nan
+
+        rows.append({
+            "start": start, "end": end,
+            "duration": int(len(seg_tgt)),
+            "ret_tgt": cum_tgt, "ret_cmp": cum_cmp, "excess": excess,
+            "MFE": mfe, "MAE": mae
+        })
+    df = pd.DataFrame(rows).sort_values("end").reset_index(drop=True)
+    return df
+
 def _sanitize_for_plot(df: pd.DataFrame) -> pd.DataFrame:
     """Ensure no tz, no object numerics, drop non-finite."""
     if not df.index.tz is None:
@@ -141,12 +209,28 @@ with st.sidebar:
     operator = st.radio("Condition", options=["RSI ≤ threshold", "RSI ≥ threshold"], index=1,
                        help="RSI ≤ threshold: Signal triggers when RSI is at or below threshold (oversold/mean reversion). RSI ≥ threshold: Signal triggers when RSI is at or above threshold (overbought/momentum).")
 
-    horizon = st.number_input("Forward return horizon (trading days)", min_value=1, max_value=252, value=3, step=1,
+    horizon = st.number_input("Forward return horizon (trading days)", min_value=1, max_value=20, value=5, step=1,
                              help="Number of trading days to look ahead when measuring returns. Shorter horizons (1-5 days) capture immediate effects, longer horizons (10-21 days) capture delayed effects.")
-    eval_window = st.number_input("Rolling evaluation window (days)", min_value=21, max_value=1260, value=1008, step=1,
-                                 help="Number of trading days used to calculate rolling signal edge. Longer windows provide more stable estimates but adapt slower to changing market conditions. 1008 days ≈ 4 years.")
-    min_ev = st.number_input("Min events in window to show edge", min_value=1, max_value=100, value=3, step=1,
+    eval_window = st.number_input("Rolling evaluation window (days)", min_value=21, max_value=252, value=63, step=1,
+                                 help="Number of trading days used to calculate rolling signal edge. Longer windows provide more stable estimates but adapt slower to changing market conditions. 63 days ≈ 3 months.")
+    min_ev = st.number_input("Min events in window to show edge", min_value=1, max_value=50, value=6, step=1,
                             help="Minimum number of signal events required within the evaluation window to calculate rolling edge. Higher values ensure statistical significance but may create gaps in the analysis.")
+
+    edge_mode = st.radio(
+        "Edge mode",
+        ["Fixed horizon (days)", "Trade-to-exit (event-based)"],
+        index=1,  # Make event-based the default
+        help="Fixed horizon: score events by forward returns over a set number of days. "
+             "Trade-to-exit: score each contiguous allocation period (from entry until exit)."
+    )
+
+    events_window = None
+    if edge_mode == "Trade-to-exit (event-based)":
+        events_window = st.number_input(
+            "Rolling events window (count)",
+            min_value=3, max_value=200, value=20, step=1,
+            help="Compute event-based edge as the rolling mean over the last N events."
+        )
 
     build_equity = st.checkbox("Show simple equity curve (long when condition true)", value=False,
                               help="Display equity curves comparing the switching strategy (target vs comparison) against buy-and-hold benchmarks. Shows cumulative performance over time.")
@@ -243,6 +327,8 @@ else:
     p = np.clip(percentile / 100.0, 0.0, 1.0)
     if perc_scope == "Whole dataset (fixed)":
         # One fixed value from the entire selected period
+        if prices['rsi'].notna().sum() < 30:
+            st.warning("Too few RSI observations to compute a stable whole-dataset percentile.")
         fixed_thresh = float(prices['rsi'].quantile(p))
         prices['rsi_thresh'] = fixed_thresh
         thresh_note = (
@@ -277,11 +363,40 @@ else:
 if signal_mode != "Absolute RSI" and perc_scope == "Rolling (windowed)":
     prices.loc[prices['rsi_thresh'].isna(), 'signal'] = False
 
-# Event returns (forward returns measured at signal dates)
-prices['event_ret'] = np.where(prices['signal'], prices['fwd_ret'], np.nan)
+# EOD decision at t -> allocated on day t+1
+alloc_bool = prices['signal'].shift(1).fillna(False).astype(bool)
 
-# Rolling signal edge (oscillates around 0 if no edge)
-prices['rolling_edge'] = rolling_signal_edge(prices['event_ret'], window=eval_window, min_events=min_ev)
+if edge_mode == "Fixed horizon (days)":
+    # Same behavior as before
+    prices['event_ret'] = np.where(prices['signal'], prices['fwd_ret'], np.nan)
+    prices['rolling_edge'] = rolling_signal_edge(
+        prices['event_ret'], window=eval_window, min_events=min_ev
+    )
+    edge_mode_note = f"Fixed horizon edge over {eval_window} trading days; forward horizon = {horizon}."
+    event_df = None
+else:
+    # Trade-to-exit (event-based)
+    event_df = build_event_table(prices, alloc_bool)
+    # Rolling event-based edge over last N events (use EXCESS vs comparison by default)
+    if not event_df.empty:
+        event_df["rolling_event_edge"] = (
+            event_df["excess"].rolling(events_window, min_periods=min_ev).mean()
+        )
+    prices['event_ret'] = np.nan   # not used in this mode
+    prices['rolling_edge'] = np.nan
+    edge_mode_note = f"Event-based edge over last {events_window} events (minimum {min_ev} events)."
+
+# Rolling win rate (frequency of positive returns) - only for fixed horizon mode
+if edge_mode == "Fixed horizon (days)":
+    prices['rolling_wr'] = rolling_win_rate(prices['event_ret'], eval_window, min_ev, win_threshold=0.0)
+else:
+    prices['rolling_wr'] = np.nan
+
+# Rolling count of events used in rolling_edge
+prices['rolling_event_count'] = prices['signal'].rolling(eval_window, min_periods=1).sum()
+
+# Time in market (allocation ratio) for the equity logic
+prices['time_in_market'] = prices['signal'].shift(1).fillna(False).rolling(252).mean()  # ~1y
 
 
 # Ensure numeric dtype for computed columns
@@ -310,108 +425,106 @@ else:
 col1, col2 = st.columns([2, 1], gap="large")
 
 with col1:
-    st.subheader("Rolling Signal Edge (mean forward return on event dates)")
-    st.caption("Oscillating line around 0 indicates changing edge over time. Positive values suggest the condition tended to precede gains over the chosen horizon.")
+    st.subheader("Signal Edge")
+    st.caption(edge_mode_note)
 
-    # Always show the full date range, even with NaN values
-    plot_df = prices[['rolling_edge']].copy()
-    # Clean all non-finite & enforce numeric, but keep NaN values for full date range
-    plot_df['rolling_edge'] = pd.to_numeric(plot_df['rolling_edge'], errors='coerce')
-    # Replace infs with NaN but don't drop rows
-    plot_df = plot_df.replace([np.inf, -np.inf], np.nan)
+    if edge_mode == "Fixed horizon (days)":
+        # --- existing rolling-edge (calendar window) plot ---
+        plot_df = prices[['rolling_edge']].copy()
+        plot_df['rolling_edge'] = pd.to_numeric(plot_df['rolling_edge'], errors='coerce')
+        plot_df = plot_df.replace([np.inf, -np.inf], np.nan)
 
-
-    if plot_df.empty:
-        st.info("No data available to plot.")
-    else:
-        # Quick diagnostic for 2025 data
-        data_2025 = plot_df[plot_df.index.year == 2025]
-        if len(data_2025) > 0:
-            st.write(f"📊 2025 data: {len(data_2025)} days, from {data_2025.index.min().date()} to {data_2025.index.max().date()}")
+        if plot_df.empty:
+            st.info("No data available to plot.")
         else:
-            st.write("📊 No 2025 data available in the analysis period")
-        # Build via graph_objects (avoid PX's dataframe coercion path)
-        dates = plot_df.index.to_pydatetime()
-        vals = plot_df['rolling_edge'].to_numpy(dtype=float)
-        
-        # Create separate traces for valid data and NaN periods
-        fig = go.Figure()
-        
-        # Add trace for valid rolling edge values (solid line)
-        valid_mask = ~np.isnan(vals)
-        if valid_mask.any():
-            fig.add_trace(go.Scatter(
-                x=dates[valid_mask], 
-                y=vals[valid_mask], 
-                mode='lines', 
-                name='Rolling edge (valid data)',
-                line=dict(color='blue', width=2)
-            ))
-        
-        # Add shaded regions for NaN periods to indicate "insufficient data"
-        nan_mask = np.isnan(vals)
-        if nan_mask.any():
-            # Find consecutive NaN periods and add them as shaded regions
-            nan_indices = np.where(nan_mask)[0]
-            if len(nan_indices) > 0:
-                # Group consecutive NaN periods
-                groups = []
-                current_group = [nan_indices[0]]
-                
-                for i in range(1, len(nan_indices)):
-                    if nan_indices[i] == nan_indices[i-1] + 1:
-                        current_group.append(nan_indices[i])
-                    else:
-                        groups.append(current_group)
-                        current_group = [nan_indices[i]]
-                groups.append(current_group)
-                
-                # Add shaded regions for each group
-                for group in groups:
-                    if len(group) > 1:  # Only shade regions with multiple consecutive NaN values
-                        start_date = dates[group[0]]
-                        end_date = dates[group[-1]]
-                        fig.add_vrect(
-                            x0=start_date, x1=end_date,
-                            fillcolor="lightgray", opacity=0.05,
-                            layer="below", line_width=0,
-                            annotation_text="Insufficient data", 
-                            annotation_position="top left"
-                        )
-        
-        fig.update_layout(
-            margin=dict(l=10, r=10, t=10, b=10),
-            height=420,
-            xaxis_title='Date',
-            yaxis_title=f'Rolling mean of {horizon}D fwd returns (on {target_ticker})',
-            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
-            # Stretch x-axis across full width for granular analysis
-            xaxis=dict(
-                showgrid=True,
-                gridwidth=1,
-                gridcolor='lightgray',
-                showline=True,
-                linewidth=1,
-                linecolor='black'
-            ),
-            # Optimize for wide display
-            autosize=True,
-            width=None  # Let it use full container width
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            dates = plot_df.index.to_pydatetime()
+            vals = plot_df['rolling_edge'].to_numpy(dtype=float)
+
+            fig = go.Figure()
+            valid_mask = ~np.isnan(vals)
+            if valid_mask.any():
+                fig.add_trace(go.Scatter(x=dates[valid_mask], y=vals[valid_mask],
+                                         mode='lines', name='Rolling edge'))
+            fig.update_layout(
+                margin=dict(l=10, r=10, t=10, b=10), height=420,
+                xaxis_title='Date',
+                yaxis_title=f'Rolling mean of {horizon}D fwd returns (on {target_ticker})',
+                # Stretch x-axis across full width for granular analysis
+                xaxis=dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='lightgray',
+                    showline=True,
+                    linewidth=1,
+                    linecolor='black'
+                ),
+                # Optimize for wide display
+                autosize=True,
+                width=None  # Let it use full container width
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    else:
+        # --- event-based edge plot (x = event end date) ---
+        if event_df is None or event_df.empty:
+            st.info("No events detected (no allocated periods). Adjust thresholds or date range.")
+        else:
+            eplot = event_df[['end', 'rolling_event_edge']].dropna()
+            if eplot.empty:
+                st.info("Not enough events to compute rolling event-based edge.")
+            else:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=eplot['end'], y=eplot['rolling_event_edge'],
+                    mode='lines+markers', name='Rolling event-based edge'
+                ))
+                fig.update_layout(
+                    margin=dict(l=10, r=10, t=10, b=10), height=420,
+                    xaxis_title='Event end date',
+                    yaxis_title=f'Rolling mean excess return (last {events_window} events)',
+                    # Stretch x-axis across full width for granular analysis
+                    xaxis=dict(
+                        showgrid=True,
+                        gridwidth=1,
+                        gridcolor='lightgray',
+                        showline=True,
+                        linewidth=1,
+                        linecolor='black'
+                    ),
+                    # Optimize for wide display
+                    autosize=True,
+                    width=None  # Let it use full container width
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+        # Optional: show an event table preview
+        with st.expander("Per-event table (entry→exit)"):
+            if event_df is not None and not event_df.empty:
+                st.dataframe(event_df.assign(
+                    start=event_df['start'].dt.date,
+                    end=event_df['end'].dt.date,
+                    ret_tgt=lambda d: (d['ret_tgt']*100).round(2),
+                    ret_cmp=lambda d: (d['ret_cmp']*100).round(2),
+                    excess=lambda d: (d['excess']*100).round(2),
+                    MFE=lambda d: (d['MFE']*100).round(2),
+                    MAE=lambda d: (d['MAE']*100).round(2),
+                ).rename(columns={
+                    'ret_tgt':'ret_tgt(%)','ret_cmp':'ret_cmp(%)','excess':'excess(%)',
+                }))
+            else:
+                st.info("No events to display.")
 
     if build_equity:
         st.subheader("Equity Curve: Target vs Comparison")
 
         # Daily returns (adjusted close pct changes) - ensure 1D arrays
-        ret_tgt = prices['close_tgt'].pct_change().values.flatten()
-        ret_cmp = prices['close_cmp'].pct_change().values.flatten()
+        ret_tgt = prices['close_tgt'].pct_change().values
+        ret_cmp = prices['close_cmp'].pct_change().values
 
-        # When condition is true → take target returns, else comparison
-        strat_ret = np.where(prices['signal'].shift(1), ret_tgt, ret_cmp)  # shift(1) = trade next day
-        
-        # Create Series with proper index alignment
-        strat_ret = pd.Series(strat_ret, index=prices.index).fillna(0)
+        # EOD decision at t-1 → hold on day t (truly boolean allocation)
+        alloc_bool = prices['signal'].shift(1).fillna(False).to_numpy(dtype=bool)
+        strat_ret = np.where(alloc_bool, ret_tgt, ret_cmp)
+        strat_ret = pd.Series(strat_ret, index=prices.index).fillna(0.0)
 
         eq_strat = (1 + strat_ret).cumprod()
         eq_tgt = (1 + pd.Series(ret_tgt, index=prices.index).fillna(0)).cumprod()
@@ -482,7 +595,7 @@ with st.expander("Show data / download"):
     show_cols = [
         'close_src', 'close_tgt', 'close_cmp',
         'rsi', 'rsi_thresh', 'signal',
-        'fwd_ret', 'event_ret', 'rolling_edge'
+        'fwd_ret', 'event_ret', 'rolling_edge', 'rolling_wr', 'rolling_event_count', 'time_in_market'
     ]
     out = prices[show_cols].copy()
     st.dataframe(out.tail(1000))
@@ -496,15 +609,16 @@ with st.expander("Show data / download"):
             mime='text/csv'
         )
 
-# Debug expander (temporary, helpful on Cloud)
-with st.expander("Debug (dtypes & head)—safe to remove later"):
-    try:
-        st.write("rolling_edge dtype:", prices['rolling_edge'].dtype)
-        st.write("Any infs?:", np.isinf(prices['rolling_edge']).any())
-        st.write("Head (non-null):")
-        st.dataframe(prices[['rolling_edge']].dropna().head(5))
-    except Exception as e:
-        st.write("Debug exception:", repr(e))
+    # Event table download for event-based mode
+    if edge_mode == "Trade-to-exit (event-based)" and event_df is not None and not event_df.empty:
+        csv_events = event_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            "Download per-event CSV",
+            data=csv_events,
+            file_name=f"{source_ticker}_{target_ticker}_event_table.csv",
+            mime="text/csv"
+        )
+
 
 # -----------------------------
 # Notes
