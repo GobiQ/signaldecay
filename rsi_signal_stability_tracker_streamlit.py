@@ -103,6 +103,9 @@ if prices.empty:
     st.error("No data returned. Check ticker or date range.")
     st.stop()
 
+# Ensure a clean, tz-naive DateTimeIndex for plotting
+prices.index = pd.to_datetime(prices.index).tz_localize(None)
+
 prices['rsi'] = compute_rsi(prices['close'], rsi_len)
 prices['fwd_ret'] = forward_return(prices['close'], horizon)
 
@@ -123,6 +126,11 @@ prices['event_ret'] = np.where(prices['signal'], prices['fwd_ret'], np.nan)
 
 # Rolling signal edge (oscillates around 0 if no edge)
 prices['rolling_edge'] = rolling_signal_edge(prices['event_ret'], window=eval_window, min_events=min_ev)
+
+# Ensure numeric dtype for computed columns
+for c in ['rsi', 'fwd_ret', 'event_ret', 'rolling_edge']:
+    if c in prices.columns:
+        prices[c] = pd.to_numeric(prices[c], errors='coerce')
 
 # Summary metrics
 total_events = int(prices['signal'].sum())
@@ -147,12 +155,20 @@ col1, col2 = st.columns([2, 1], gap="large")
 with col1:
     st.subheader("Rolling Signal Edge (mean forward return on event dates)")
     st.caption("Oscillating line around 0 indicates changing edge over time. Positive values suggest the condition tended to precede gains over the chosen horizon.")
-    plot_df = prices[['rolling_edge']].copy()
-    plot_df = plot_df.dropna()
+    plot_df = prices[['rolling_edge']].dropna().astype({'rolling_edge': 'float64'})
+    
     if plot_df.empty:
-        st.info("Not enough events within the evaluation window to compute a rolling edge. Try reducing min events, shortening horizon, or extending the date range.")
+        st.info("Not enough events within the evaluation window to compute a rolling edge. "
+                "Try reducing min events, shortening horizon, or extending the date range.")
     else:
-        fig = px.line(plot_df, x=plot_df.index, y='rolling_edge', labels={'rolling_edge': f'Rolling mean of {horizon}D fwd returns'}, title=None)
+        plot_df_reset = plot_df.reset_index().rename(columns={'index': 'date'})
+        fig = px.line(
+            plot_df_reset,
+            x='date',
+            y='rolling_edge',
+            labels={'rolling_edge': f'Rolling mean of {horizon}D fwd returns', 'date': 'Date'},
+            title=None,
+        )
         fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=420)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -164,7 +180,9 @@ with col1:
         eq = (1 + strat_ret.fillna(0)).cumprod()
         bench = (1 + ret.fillna(0)).cumprod()
         eq_df = pd.DataFrame({'Strategy': eq, 'Buy&Hold': bench})
-        fig2 = px.line(eq_df, x=eq_df.index, y=['Strategy', 'Buy&Hold'])
+        eq_reset = eq_df.reset_index().rename(columns={'index': 'date'})
+        fig2 = px.line(eq_reset, x='date', y=['Strategy', 'Buy&Hold'],
+                       labels={'date': 'Date'})
         fig2.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=420)
         st.plotly_chart(fig2, use_container_width=True)
 
