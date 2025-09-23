@@ -722,9 +722,7 @@ with col1:
                     last_day_str = last_day.strftime('%Y-%m-%d')
                     fig.add_vline(
                         x=last_day_str, 
-                        line=dict(width=2, dash="dot", color="red", opacity=0.7),
-                        annotation_text=f"EOY {year}",
-                        annotation_position="top"
+                        line=dict(width=2, dash="dot", color="red", opacity=0.7)
                     )
             
             fig.update_layout(
