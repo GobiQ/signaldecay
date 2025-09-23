@@ -209,13 +209,6 @@ with st.sidebar:
     operator = st.radio("Condition", options=["RSI ≤ threshold", "RSI ≥ threshold"], index=1,
                        help="RSI ≤ threshold: Signal triggers when RSI is at or below threshold (oversold/mean reversion). RSI ≥ threshold: Signal triggers when RSI is at or above threshold (overbought/momentum).")
 
-    horizon = st.number_input("Forward return horizon (trading days)", min_value=1, max_value=20, value=5, step=1,
-                             help="Number of trading days to look ahead when measuring returns. Shorter horizons (1-5 days) capture immediate effects, longer horizons (10-21 days) capture delayed effects.")
-    eval_window = st.number_input("Rolling evaluation window (days)", min_value=21, max_value=252, value=63, step=1,
-                                 help="Number of trading days used to calculate rolling signal edge. Longer windows provide more stable estimates but adapt slower to changing market conditions. 63 days ≈ 3 months.")
-    min_ev = st.number_input("Min events in window to show edge", min_value=1, max_value=50, value=6, step=1,
-                            help="Minimum number of signal events required within the evaluation window to calculate rolling edge. Higher values ensure statistical significance but may create gaps in the analysis.")
-
     edge_mode = st.radio(
         "Edge mode",
         ["Fixed horizon (days)", "Trade-to-exit (event-based)"],
@@ -224,8 +217,19 @@ with st.sidebar:
              "Trade-to-exit: score each contiguous allocation period (from entry until exit)."
     )
 
-    events_window = None
-    if edge_mode == "Trade-to-exit (event-based)":
+    if edge_mode == "Fixed horizon (days)":
+        horizon = st.number_input("Forward return horizon (trading days)", min_value=1, max_value=20, value=5, step=1,
+                                 help="Number of trading days to look ahead when measuring returns. Shorter horizons (1-5 days) capture immediate effects, longer horizons (10-21 days) capture delayed effects.")
+        eval_window = st.number_input("Rolling evaluation window (days)", min_value=21, max_value=252, value=63, step=1,
+                                     help="Number of trading days used to calculate rolling signal edge. Longer windows provide more stable estimates but adapt slower to changing market conditions. 63 days ≈ 3 months.")
+        min_ev = st.number_input("Min events in window to show edge", min_value=1, max_value=50, value=6, step=1,
+                                help="Minimum number of signal events required within the evaluation window to calculate rolling edge. Higher values ensure statistical significance but may create gaps in the analysis.")
+    else:
+        # Trade-to-exit mode - use different defaults
+        horizon = 5  # Not used but needed for compatibility
+        eval_window = 63  # Not used but needed for compatibility
+        min_ev = st.number_input("Min events in window to show edge", min_value=1, max_value=50, value=6, step=1,
+                                help="Minimum number of events required to compute rolling event-based edge. Higher values ensure statistical significance.")
         events_window = st.number_input(
             "Rolling events window (count)",
             min_value=3, max_value=200, value=20, step=1,
@@ -600,35 +604,19 @@ with col2:
             st.metric("Min win rate", f"{wr_stats.min():.1%}")
             st.metric("Max win rate", f"{wr_stats.max():.1%}")
             
-            # Simple win rate plot
-            wr_plot = prices[['rolling_wr']].copy()
-            wr_plot['rolling_wr'] = pd.to_numeric(wr_plot['rolling_wr'], errors='coerce')
-            wr_plot = wr_plot.replace([np.inf, -np.inf], np.nan)
-            
-            if not wr_plot.empty:
-                dates = wr_plot.index.to_pydatetime()
-                vals = wr_plot['rolling_wr'].to_numpy(dtype=float)
+            # Simple win rate plot - simplified to avoid rendering issues
+            try:
+                wr_plot = prices[['rolling_wr']].copy()
+                wr_plot['rolling_wr'] = pd.to_numeric(wr_plot['rolling_wr'], errors='coerce')
+                wr_plot = wr_plot.replace([np.inf, -np.inf], np.nan)
                 
-                fig_wr = go.Figure()
-                valid_mask = ~np.isnan(vals)
-                if valid_mask.any():
-                    fig_wr.add_trace(go.Scatter(
-                        x=dates[valid_mask], 
-                        y=vals[valid_mask], 
-                        mode='lines', 
-                        name='Win Rate',
-                        line=dict(color='green', width=2)
-                    ))
-                
-                fig_wr.update_layout(
-                    margin=dict(l=10, r=10, t=10, b=10),
-                    height=300,
-                    xaxis_title='Date',
-                    yaxis_title='Win Rate (%)',
-                    yaxis=dict(tickformat='.1%'),
-                    showlegend=False
-                )
-                st.plotly_chart(fig_wr, use_container_width=True)
+                if not wr_plot.empty and wr_plot['rolling_wr'].notna().any():
+                    # Use a simple line chart
+                    st.line_chart(wr_plot['rolling_wr'], height=200)
+                else:
+                    st.info("No win rate data to plot")
+            except Exception as e:
+                st.info(f"Win rate plot unavailable: {str(e)}")
         else:
             st.info("No win rate data available")
     else:
