@@ -802,10 +802,35 @@ with col1:
             figd.add_trace(go.Histogram(
                 x=ev, name="Events", nbinsx=bins, histnorm="probability", opacity=0.75
             ))
+            
+            # Add distribution curve overlay for events
+            if len(ev) > 1:
+                from scipy.stats import gaussian_kde
+                kde = gaussian_kde(ev)
+                x_range = np.linspace(ev.min(), ev.max(), 100)
+                y_kde = kde(x_range)
+                # Scale to match histogram probability density
+                y_kde_scaled = y_kde * (ev.max() - ev.min()) / bins
+                figd.add_trace(go.Scatter(
+                    x=x_range, y=y_kde_scaled, mode='lines', name='Events (KDE)', 
+                    line=dict(color='blue', width=2), opacity=0.8
+                ))
+            
             if overlay_baseline and bv is not None and bv.size > 2:
                 figd.add_trace(go.Histogram(
                     x=bv, name="Baseline (all days)", nbinsx=bins, histnorm="probability", opacity=0.45
                 ))
+                # Add distribution curve overlay for baseline
+                if len(bv) > 1:
+                    from scipy.stats import gaussian_kde
+                    kde_baseline = gaussian_kde(bv)
+                    x_range_baseline = np.linspace(bv.min(), bv.max(), 100)
+                    y_kde_baseline = kde_baseline(x_range_baseline)
+                    y_kde_baseline_scaled = y_kde_baseline * (bv.max() - bv.min()) / bins
+                    figd.add_trace(go.Scatter(
+                        x=x_range_baseline, y=y_kde_baseline_scaled, mode='lines', name='Baseline (KDE)', 
+                        line=dict(color='orange', width=2), opacity=0.8
+                    ))
                 figd.update_layout(barmode="overlay")
 
             # Reference lines
@@ -863,6 +888,20 @@ with col1:
                 figd.add_trace(go.Histogram(
                     x=vals, name="Events", nbinsx=bins, histnorm="probability", opacity=0.75
                 ))
+                
+                # Add distribution curve overlay for events
+                if len(vals) > 1:
+                    from scipy.stats import gaussian_kde
+                    kde = gaussian_kde(vals)
+                    x_range = np.linspace(vals.min(), vals.max(), 100)
+                    y_kde = kde(x_range)
+                    # Scale to match histogram probability density
+                    y_kde_scaled = y_kde * (vals.max() - vals.min()) / bins
+                    figd.add_trace(go.Scatter(
+                        x=x_range, y=y_kde_scaled, mode='lines', name='Events (KDE)', 
+                        line=dict(color='blue', width=2), opacity=0.8
+                    ))
+                
                 figd.add_vline(x=0.0, line=dict(dash="dot"))
                 mean_v = float(np.nanmean(vals))
                 median_v = float(np.nanmedian(vals))
