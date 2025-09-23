@@ -157,6 +157,12 @@ if cmp.empty:
 
 # Auto-adjust start date to earliest common date if requested
 if auto_start:
+    # Debug: Show the actual date ranges for each ticker
+    st.write("🔍 **Debug - Date ranges for each ticker:**")
+    st.write(f"- {source_ticker}: {src.index.min().date()} to {src.index.max().date()}")
+    st.write(f"- {target_ticker}: {tgt.index.min().date()} to {tgt.index.max().date()}")
+    st.write(f"- {comparison_ticker}: {cmp.index.min().date()} to {cmp.index.max().date()}")
+    
     # Find the earliest common date where all three tickers have data
     earliest_common_date = max(
         src.index.min().date(),
@@ -164,24 +170,17 @@ if auto_start:
         cmp.index.min().date()
     )
     
-    # If the earliest common date is later than the selected start date, adjust
-    if earliest_common_date > start_date:
-        st.info(f"📅 Auto-adjusted start date from {start_date} to {earliest_common_date} "
-                f"to ensure all three tickers have data throughout the analysis period.")
-        
-        # Reload data with the adjusted start date
-        src = load_prices(source_ticker, str(earliest_common_date), str(end_date))
-        tgt = load_prices(target_ticker, str(earliest_common_date), str(end_date))
-        cmp = load_prices(comparison_ticker, str(earliest_common_date), str(end_date))
-    else:
-        # The selected start date is already after the earliest common date, so we can extend back
-        st.info(f"📅 Extending analysis period back to {earliest_common_date} "
-                f"to maximize data coverage for all three tickers.")
-        
-        # Reload data with the earliest possible start date
-        src = load_prices(source_ticker, str(earliest_common_date), str(end_date))
-        tgt = load_prices(target_ticker, str(earliest_common_date), str(end_date))
-        cmp = load_prices(comparison_ticker, str(earliest_common_date), str(end_date))
+    st.write(f"📅 **Earliest common date: {earliest_common_date}**")
+    st.write(f"📅 **Selected start date: {start_date}**")
+    
+    # Always reload with the earliest common date to maximize data coverage
+    st.info(f"📅 Extending analysis period back to {earliest_common_date} "
+            f"to maximize data coverage for all three tickers.")
+    
+    # Reload data with the earliest possible start date
+    src = load_prices(source_ticker, str(earliest_common_date), str(end_date))
+    tgt = load_prices(target_ticker, str(earliest_common_date), str(end_date))
+    cmp = load_prices(comparison_ticker, str(earliest_common_date), str(end_date))
 
 # Ensure tz-naive DateTimeIndex
 src.index = pd.to_datetime(src.index).tz_localize(None)
