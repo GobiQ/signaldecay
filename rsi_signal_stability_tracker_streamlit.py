@@ -697,15 +697,13 @@ with col1:
         eq_strat = (1 + strat_ret).cumprod()
         eq_cmp   = (1 + ret_cmp_s).cumprod()
 
-        # Tax-adjust both the strategy and the baseline
+        # Tax-adjust only the strategy
         eq_strat_tax = calculate_tax_adjusted_equity(strat_ret, tax_rate)
-        eq_cmp_tax   = calculate_tax_adjusted_equity(ret_cmp_s, tax_rate)
 
         eq_df = pd.DataFrame({
             'Strategy (pre-tax)': eq_strat,
             f'Strategy (Tax {tax_rate:.0f}%)': eq_strat_tax,
-            f'Buy&Hold {comparison_ticker} (pre-tax)': eq_cmp,
-            f'Buy&Hold {comparison_ticker} (Tax {tax_rate:.0f}%)': eq_cmp_tax
+            f'Buy&Hold {comparison_ticker}': eq_cmp
         })
 
         eq_df = _sanitize_for_plot(eq_df)
