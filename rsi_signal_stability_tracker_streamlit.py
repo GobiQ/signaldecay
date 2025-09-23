@@ -1173,16 +1173,23 @@ with st.expander("Statistical significance", expanded=False):
 
             st.write(results)
 
-            # Significance determination
+            # Monte Carlo results (if enabled)
             if use_monte_carlo and "Monte Carlo p (mean > 0)" in results:
+                st.markdown("**Monte Carlo Test Results:**")
+                st.write(f"Observed mean: {obs:.4%}")
+                st.write(f"Monte Carlo p-value: {p_mc:.4f}")
+                st.write(f"Simulations: 500 random date rotations")
+                
                 if p_mc < 0.05:
-                    st.success("Significant at 5%: Monte Carlo test shows edge.")
+                    st.success("✅ **Significant at 5%**: Monte Carlo test shows edge.")
                 else:
-                    st.info("Not significant at 5%: Monte Carlo test.")
-            elif (np.isfinite(p_hac) and p_hac < 0.05) and (lo_wr > 0.5):
-                st.success("Significant at 5%: mean > 0 (HAC) **and** win-rate CI > 50%.")
+                    st.info("⚠️ **Not significant at 5%**: Monte Carlo test.")
             else:
-                st.info("Not jointly significant at 5%; interpret with caution.")
+                # Standard significance determination
+                if (np.isfinite(p_hac) and p_hac < 0.05) and (lo_wr > 0.5):
+                    st.success("✅ **Significant at 5%**: mean > 0 (HAC) **and** win-rate CI > 50%.")
+                else:
+                    st.info("⚠️ **Not jointly significant at 5%**: interpret with caution.")
         else:
             st.info("Not enough events to test.")
 
