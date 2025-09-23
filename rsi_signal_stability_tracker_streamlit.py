@@ -133,8 +133,8 @@ with st.sidebar:
     operator = st.radio("Condition", options=["RSI ≤ threshold", "RSI ≥ threshold"], index=0)
 
     horizon = st.number_input("Forward return horizon (trading days)", min_value=1, max_value=252, value=3, step=1)
-    eval_window = st.number_input("Rolling evaluation window (days)", min_value=21, max_value=1260, value=84, step=1)
-    min_ev = st.number_input("Min events in window to show edge", min_value=1, max_value=100, value=10, step=1)
+    eval_window = st.number_input("Rolling evaluation window (days)", min_value=21, max_value=1260, value=252, step=1)
+    min_ev = st.number_input("Min events in window to show edge", min_value=1, max_value=100, value=3, step=1)
 
     build_equity = st.checkbox("Show simple equity curve (long when condition true)", value=False)
     download_switch = st.checkbox("Enable CSV download of results", value=True)
@@ -285,7 +285,7 @@ prices['event_ret'] = np.where(prices['signal'], prices['fwd_ret'], np.nan)
 # Rolling signal edge (oscillates around 0 if no edge)
 prices['rolling_edge'] = rolling_signal_edge(prices['event_ret'], window=eval_window, min_events=min_ev)
 
-# Debug: Check the rolling edge calculation
+# Debug: Check the rolling edge calculation (can be removed later)
 st.write("🔍 **Debug - Rolling edge calculation:**")
 st.write(f"- Total events (signal=True): {prices['signal'].sum()}")
 st.write(f"- Event returns non-null count: {prices['event_ret'].notna().sum()}")
