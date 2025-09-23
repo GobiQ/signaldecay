@@ -720,10 +720,7 @@ with col1:
                     last_day = year_data.index[-1]
                     # Convert to datetime string for Plotly compatibility
                     last_day_str = last_day.strftime('%Y-%m-%d')
-                    fig.add_vline(
-                        x=last_day_str, 
-                        line=dict(width=2, dash="dot", color="red", opacity=0.7)
-                    )
+                    fig.add_vline(x=last_day_str, line_dash="dot", line_color="red")
             
             fig.update_layout(
                 margin=dict(l=10, r=10, t=30, b=10),
