@@ -718,9 +718,10 @@ with col1:
                 year_data = eq_df[eq_df.index.to_period("Y") == year]
                 if not year_data.empty:
                     last_day = year_data.index[-1]
-                    # Convert to datetime if needed and add more visible line
+                    # Convert to datetime string for Plotly compatibility
+                    last_day_str = last_day.strftime('%Y-%m-%d')
                     fig.add_vline(
-                        x=last_day, 
+                        x=last_day_str, 
                         line=dict(width=2, dash="dot", color="red", opacity=0.7),
                         annotation_text=f"EOY {year}",
                         annotation_position="top"
