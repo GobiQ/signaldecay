@@ -194,7 +194,7 @@ def _clip_tails(x: pd.Series | np.ndarray, pct_each_side: float = 1.0) -> np.nda
 # -----------------------------
 # UI
 # -----------------------------
-st.set_page_config(page_title="RSI Signal Stability Tracker", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Signal Decay", page_icon="📈", layout="wide")
 
 st.title("Signal Decay")
 st.caption("Signal Stability Analysis")
