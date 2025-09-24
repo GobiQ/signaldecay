@@ -29,12 +29,19 @@ def compute_rsi(close: pd.Series, length: int = 14) -> pd.Series:
 
 @st.cache_data(ttl=24*3600, show_spinner=False)
 def load_prices(ticker: str, start: str, end: str) -> pd.DataFrame:
-    df = yf.download(ticker, start=start, end=end, auto_adjust=True, progress=False)
-    if df.empty:
+    try:
+        df = yf.download(ticker, start=start, end=end, auto_adjust=True, progress=False)
+        if df.empty:
+            # Try with different parameters if first attempt fails
+            df = yf.download(ticker, start=start, end=end, auto_adjust=False, progress=False)
+        if df.empty:
+            return df
+        df = df[['Close']].rename(columns={'Close': 'close'})
+        df = df[~df.index.duplicated(keep='first')]
         return df
-    df = df[['Close']].rename(columns={'Close': 'close'})
-    df = df[~df.index.duplicated(keep='first')]
-    return df
+    except Exception as e:
+        # Return empty DataFrame if there's an error
+        return pd.DataFrame()
 
 def forward_return(close: pd.Series, horizon: int) -> pd.Series:
     return close.shift(-horizon) / close - 1.0
@@ -379,6 +386,13 @@ with st.sidebar:
     
     download_switch = st.checkbox("Enable CSV download of results", value=True,
                                  help="Allow downloading the analysis results as a CSV file containing all calculated values (RSI, signals, returns, etc.) for further analysis.")
+    
+    # Add cache clearing option for debugging
+    if st.button("🔄 Clear Data Cache (if having ticker issues)"):
+        st.cache_data.clear()
+        st.success("Cache cleared! Please refresh the page.")
+        st.rerun()
+    
 
 # -----------------------------
 # Data & Signal
@@ -399,13 +413,32 @@ if auto_start:
     cmp = load_prices(comparison_ticker, str(early_start), str(end_date))
     
     if src.empty:
-        st.error(f"No data for source ticker: {source_ticker}")
+        st.error(f"❌ **No data found for source ticker: {source_ticker}**")
+        st.write("**Possible solutions:**")
+        st.write("- Check if the ticker symbol is correct")
+        st.write("- Try a different date range")
+        st.write("- Use a more common ticker like SPY, QQQ, or IWM")
         st.stop()
     if tgt.empty:
-        st.error(f"No data for target ticker: {target_ticker}")
+        st.error(f"❌ **No data found for target ticker: {target_ticker}**")
+        st.write("**Possible solutions:**")
+        st.write("- Check if the ticker symbol is correct")
+        st.write("- Try alternative leveraged ETFs:")
+        st.write("  - For QQQ: TQQQ (3x), QLD (2x), QQQ (1x)")
+        st.write("  - For SPY: SPXL (3x), SPUU (2x), SPY (1x)")
+        st.write("  - For IWM: TNA (3x), UWM (2x), IWM (1x)")
+        st.write("- Adjust the date range (some ETFs started later)")
+        st.write("- Try the 'Clear Data Cache' button if you suspect caching issues")
         st.stop()
     if cmp.empty:
-        st.error(f"No data for comparison ticker: {comparison_ticker}")
+        st.error(f"❌ **No data found for comparison ticker: {comparison_ticker}**")
+        st.write("**Possible solutions:**")
+        st.write("- Check if the ticker symbol is correct")
+        st.write("- Try common alternatives:")
+        st.write("  - Cash equivalents: BIL, SHY, SHV")
+        st.write("  - Bond ETFs: TLT, IEF, AGG")
+        st.write("  - Inverse ETFs: SQQQ, SPXS, TZA")
+        st.write("- Adjust the date range")
         st.stop()
 
     # Find the earliest common date where all three tickers have data
