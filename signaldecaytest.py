@@ -27,8 +27,51 @@ def compute_rsi(close: pd.Series, length: int = 14) -> pd.Series:
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
+def load_prices_uncached(ticker: str, start: str, end: str) -> pd.DataFrame:
+    """Non-cached version of load_prices for preconditions to avoid cache issues."""
+    try:
+        # Try multiple approaches to get the most recent data
+        df = yf.download(ticker, start=start, end=end, auto_adjust=True, progress=False)
+        if df.empty:
+            # Try with different parameters if first attempt fails
+            df = yf.download(ticker, start=start, end=end, auto_adjust=False, progress=False)
+        if df.empty:
+            # Try extending the end date to ensure we get recent data
+            from datetime import datetime, timedelta
+            extended_end = (datetime.strptime(end, '%Y-%m-%d') + timedelta(days=7)).strftime('%Y-%m-%d')
+            df = yf.download(ticker, start=start, end=extended_end, auto_adjust=True, progress=False)
+        if df.empty:
+            # Try using the Ticker object for more recent data
+            ticker_obj = yf.Ticker(ticker)
+            hist = ticker_obj.history(start=start, end=end, auto_adjust=True)
+            if not hist.empty:
+                df = hist[['Close']].rename(columns={'Close': 'close'})
+        
+        # If still empty, try with a more aggressive approach for recent data
+        if df.empty:
+            from datetime import datetime, timedelta
+            # Try getting data with a much wider end date to ensure we capture recent data
+            very_extended_end = (datetime.strptime(end, '%Y-%m-%d') + timedelta(days=30)).strftime('%Y-%m-%d')
+            df = yf.download(ticker, start=start, end=very_extended_end, auto_adjust=True, progress=False)
+            # If we get data but it's too far in the future, trim it to the requested end date
+            if not df.empty and df.index.max().date() > datetime.strptime(end, '%Y-%m-%d').date():
+                df = df[df.index <= end]
+        if df.empty:
+            return df
+        
+        # Handle MultiIndex columns properly
+        if isinstance(df.columns, pd.MultiIndex):
+            df = df.droplevel(1, axis=1)  # Remove the ticker level from MultiIndex
+        
+        df = df[['Close']].rename(columns={'Close': 'close'})
+        df = df[~df.index.duplicated(keep='first')]
+        return df
+    except Exception as e:
+        # Return empty DataFrame if there's an error
+        return pd.DataFrame()
+
 @st.cache_data(ttl=3600, show_spinner=False)  # Reduced cache to 1 hour for fresher data
-def load_prices(ticker: str, start: str, end: str, cache_buster: int = 0) -> pd.DataFrame:
+def load_prices(ticker: str, start: str, end: str) -> pd.DataFrame:
     try:
         # Try multiple approaches to get the most recent data
         df = yf.download(ticker, start=start, end=end, auto_adjust=True, progress=False)
@@ -293,7 +336,6 @@ def build_precondition_mask(
     start_date: str,
     end_date: str,
     rsi_len: int,
-    cache_buster: int = 0,
 ) -> tuple[pd.Series, list[str]]:
     """
     Returns:
@@ -322,7 +364,7 @@ def build_precondition_mask(
             # Try to get data with a more aggressive end date to ensure we get recent data
             from datetime import datetime, timedelta
             extended_end = (datetime.strptime(str(end_date), '%Y-%m-%d') + timedelta(days=7)).strftime('%Y-%m-%d')
-            s = load_prices(tkr, str(start_date), extended_end, cache_buster)
+            s = load_prices_uncached(tkr, str(start_date), extended_end)
         except Exception:
             s = pd.DataFrame()
 
@@ -410,12 +452,8 @@ with st.sidebar:
             with cols[1]:
                 if st.button("🗑️", key=f"remove_pre_{i}"):
                     st.session_state.preconditions.pop(i)
-                    # Automatically clear cache when removing a precondition
+                    # Clear cache when removing a precondition
                     st.cache_data.clear()
-                    # Force a complete refresh by updating session state
-                    if 'precondition_change_counter' not in st.session_state:
-                        st.session_state.precondition_change_counter = 0
-                    st.session_state.precondition_change_counter += 1
                     st.rerun()
     else:
         st.caption("Add optional RSI gates on other tickers that must also be true.")
@@ -435,24 +473,16 @@ with st.sidebar:
                 "comparison": pc_cmp,
                 "threshold": float(pc_thr),
             })
-            # Automatically clear cache when adding a precondition
+            # Clear cache when adding a precondition
             st.cache_data.clear()
-            # Force a complete refresh by updating session state
-            if 'precondition_change_counter' not in st.session_state:
-                st.session_state.precondition_change_counter = 0
-            st.session_state.precondition_change_counter += 1
             st.rerun()
 
     # Bulk clear
     if st.session_state.preconditions:
         if st.button("🗑️ Clear all preconditions", type="secondary"):
             st.session_state.preconditions = []
-            # Automatically clear cache when clearing all preconditions
+            # Clear cache when clearing all preconditions
             st.cache_data.clear()
-            # Force a complete refresh by updating session state
-            if 'precondition_change_counter' not in st.session_state:
-                st.session_state.precondition_change_counter = 0
-            st.session_state.precondition_change_counter += 1
             st.rerun()
 
     st.markdown("---")
@@ -605,9 +635,6 @@ if not source_ticker or not target_ticker or not comparison_ticker:
     st.warning("Enter all three ticker symbols to begin.")
     st.stop()
 
-# Get cache buster from session state
-cache_buster = st.session_state.get('precondition_change_counter', 0)
-
 # Auto-adjust start date to earliest common date if requested
 if auto_start:
     # First, try to load data from a much earlier date to find the true earliest common date
@@ -615,9 +642,9 @@ if auto_start:
     early_start = date(1990, 1, 1)
     
     # Load all three tickers from the early start date
-    src = load_prices(source_ticker, str(early_start), str(end_date), cache_buster)
-    tgt = load_prices(target_ticker, str(early_start), str(end_date), cache_buster)
-    cmp = load_prices(comparison_ticker, str(early_start), str(end_date), cache_buster)
+    src = load_prices(source_ticker, str(early_start), str(end_date))
+    tgt = load_prices(target_ticker, str(early_start), str(end_date))
+    cmp = load_prices(comparison_ticker, str(early_start), str(end_date))
     
     if src.empty:
         st.error(f"❌ **No data found for source ticker: {source_ticker}**")
@@ -662,7 +689,7 @@ if auto_start:
         tkr = p.get("signal_ticker", "").strip().upper()
         if tkr:
             try:
-                pc_data = load_prices(tkr, str(early_start), str(end_date), cache_buster)
+                pc_data = load_prices_uncached(tkr, str(early_start), str(end_date))
                 if not pc_data.empty:
                     all_ticker_dates.append(pc_data.index.min().date())
                     precondition_data_info.append(f"{tkr}: {pc_data.index.min().date()} to {pc_data.index.max().date()}")
@@ -681,15 +708,15 @@ if auto_start:
     
     
     # Reload data with the earliest possible start date
-    src = load_prices(source_ticker, str(start_date), str(end_date), cache_buster)
-    tgt = load_prices(target_ticker, str(start_date), str(end_date), cache_buster)
-    cmp = load_prices(comparison_ticker, str(start_date), str(end_date), cache_buster)
+    src = load_prices(source_ticker, str(start_date), str(end_date))
+    tgt = load_prices(target_ticker, str(start_date), str(end_date))
+    cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
     
 else:
     # Load all three tickers with user's selected start date
-    src = load_prices(source_ticker, str(start_date), str(end_date), cache_buster)
-    tgt = load_prices(target_ticker, str(start_date), str(end_date), cache_buster)
-    cmp = load_prices(comparison_ticker, str(start_date), str(end_date), cache_buster)
+    src = load_prices(source_ticker, str(start_date), str(end_date))
+    tgt = load_prices(target_ticker, str(start_date), str(end_date))
+    cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
     
     # Also check precondition tickers to ensure they have data in the selected range
     pre_list = st.session_state.get("preconditions", [])
@@ -697,7 +724,7 @@ else:
         tkr = p.get("signal_ticker", "").strip().upper()
         if tkr:
             try:
-                pc_data = load_prices(tkr, str(start_date), str(end_date), cache_buster)
+                pc_data = load_prices_uncached(tkr, str(start_date), str(end_date))
                 if pc_data.empty:
                     st.warning(f"⚠️ Precondition ticker {tkr} has no data in the selected date range ({start_date} to {end_date}). It will be treated as always False.")
             except Exception:
@@ -809,7 +836,6 @@ pc_mask, pc_msgs = build_precondition_mask(
     start_date=start_date,
     end_date=end_date,
     rsi_len=rsi_len,
-    cache_buster=cache_buster,
 )
 
 # Apply mask (all preconditions must be True)
