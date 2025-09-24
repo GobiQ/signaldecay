@@ -456,8 +456,6 @@ with st.sidebar:
             with cols[1]:
                 if st.button("🗑️", key=f"remove_pre_{i}"):
                     st.session_state.preconditions.pop(i)
-                    # Reset run analysis flag when preconditions change
-                    st.session_state.run_analysis = False
                     st.rerun()
     else:
         st.caption("Add optional RSI gates on other tickers that must also be true.")
@@ -477,8 +475,6 @@ with st.sidebar:
                 "comparison": pc_cmp,
                 "threshold": float(pc_thr),
             })
-            # Reset run analysis flag when preconditions change
-            st.session_state.run_analysis = False
             # Add debug info
             st.info(f"🔍 **Debug**: Added precondition for {pc_tkr}. Total preconditions: {len(st.session_state.preconditions)}")
             st.rerun()
@@ -487,33 +483,19 @@ with st.sidebar:
     if st.session_state.preconditions:
         if st.button("🗑️ Clear all preconditions", type="secondary"):
             st.session_state.preconditions = []
-            # Reset run analysis flag when preconditions change
-            st.session_state.run_analysis = False
             st.rerun()
 
     st.markdown("---")
     
     # Run Analysis Button
     st.subheader("Run Analysis")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
-            st.session_state.run_analysis = True
-            st.cache_data.clear()  # Clear cache like the manual button does
-            st.success("Cache cleared! Running analysis...")
-            st.rerun()
-    
-    with col2:
-        if st.button("🔄 Reset", use_container_width=True):
-            st.session_state.run_analysis = False
-            st.rerun()
+    if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
+        st.cache_data.clear()  # Clear cache like the manual button does
+        st.success("Cache cleared! Please refresh the page.")
+        st.stop()  # Stop execution like the manual button does
     
     # Show status
-    if st.session_state.get("run_analysis", False):
-        st.success("✅ Analysis is running...")
-    else:
-        st.info("👆 Click 'Run Analysis' to start the analysis")
+    st.info("👆 Click 'Run Analysis' to clear cache and refresh the page")
     
     st.markdown("---")
     
@@ -665,12 +647,7 @@ if not source_ticker or not target_ticker or not comparison_ticker:
     st.warning("Enter all three ticker symbols to begin.")
     st.stop()
 
-# Only run analysis if the Run Analysis button has been clicked
-if not st.session_state.get("run_analysis", False):
-    st.info("👆 **Please click 'Run Analysis' to start the analysis**")
-    st.stop()
-
-# Analysis is running - cache was already cleared by the button
+# Run analysis automatically (cache clearing is handled by the Run Analysis button)
 st.info(f"🔄 **Debug**: Running analysis with fresh data")
 
 # Auto-adjust start date to earliest common date if requested
