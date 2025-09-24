@@ -548,19 +548,37 @@ if auto_start:
         st.write("- Adjust the date range")
         st.stop()
 
-    # Find the earliest common date where all three tickers have data
-    earliest_common_date = max(
+    # Find the earliest common date where all tickers (main + preconditions) have data
+    all_ticker_dates = [
         src.index.min().date(),
         tgt.index.min().date(), 
         cmp.index.min().date()
-    )
+    ]
+    
+    # Add precondition ticker dates
+    pre_list = st.session_state.get("preconditions", [])
+    for p in pre_list:
+        tkr = p.get("signal_ticker", "").strip().upper()
+        if tkr:
+            try:
+                pc_data = load_prices(tkr, str(early_start), str(end_date))
+                if not pc_data.empty:
+                    all_ticker_dates.append(pc_data.index.min().date())
+            except Exception:
+                # If precondition ticker fails to load, we'll handle it later
+                pass
+    
+    earliest_common_date = max(all_ticker_dates)
     
     # Update start_date to reflect the actual date being used
     original_start_date = start_date
     start_date = earliest_common_date
     
     # Always reload with the earliest common date to maximize data coverage
-    st.info(f"📅 **Analysis period: {start_date} to {end_date}**")
+    if pre_list:
+        st.info(f"📅 **Analysis period: {start_date} to {end_date}** (auto-adjusted to include precondition tickers)")
+    else:
+        st.info(f"📅 **Analysis period: {start_date} to {end_date}**")
     
     # Reload data with the earliest possible start date
     src = load_prices(source_ticker, str(start_date), str(end_date))
@@ -571,6 +589,18 @@ else:
     src = load_prices(source_ticker, str(start_date), str(end_date))
     tgt = load_prices(target_ticker, str(start_date), str(end_date))
     cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
+    
+    # Also check precondition tickers to ensure they have data in the selected range
+    pre_list = st.session_state.get("preconditions", [])
+    for p in pre_list:
+        tkr = p.get("signal_ticker", "").strip().upper()
+        if tkr:
+            try:
+                pc_data = load_prices(tkr, str(start_date), str(end_date))
+                if pc_data.empty:
+                    st.warning(f"⚠️ Precondition ticker {tkr} has no data in the selected date range ({start_date} to {end_date}). It will be treated as always False.")
+            except Exception:
+                st.warning(f"⚠️ Failed to load data for precondition ticker {tkr}. It will be treated as always False.")
     
     if src.empty:
         st.error(f"No data for source ticker: {source_ticker}")
@@ -681,6 +711,13 @@ pc_mask, pc_msgs = build_precondition_mask(
 # Apply mask (all preconditions must be True)
 # Ensure pc_mask is properly aligned to prices.index
 pc_mask_aligned = pc_mask.reindex(prices.index).fillna(False).astype(bool)
+
+# Safety check: ensure both series have the same length
+if len(prices['signal']) != len(pc_mask_aligned):
+    st.error(f"❌ **Length mismatch detected**: prices signal ({len(prices['signal'])}) vs pc_mask ({len(pc_mask_aligned)})")
+    st.write("This should not happen with the updated auto-start logic. Please try refreshing the page.")
+    st.stop()
+
 prices['signal'] = prices['signal'] & pc_mask_aligned
 
 # Surface any data messages
