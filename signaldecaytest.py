@@ -27,7 +27,7 @@ def compute_rsi(close: pd.Series, length: int = 14) -> pd.Series:
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-@st.cache_data(ttl=24*3600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)  # Reduced cache to 1 hour for fresher data
 def load_prices(ticker: str, start: str, end: str) -> pd.DataFrame:
     try:
         # Try multiple approaches to get the most recent data
@@ -46,8 +46,23 @@ def load_prices(ticker: str, start: str, end: str) -> pd.DataFrame:
             hist = ticker_obj.history(start=start, end=end, auto_adjust=True)
             if not hist.empty:
                 df = hist[['Close']].rename(columns={'Close': 'close'})
+        
+        # If still empty, try with a more aggressive approach for recent data
+        if df.empty:
+            from datetime import datetime, timedelta
+            # Try getting data with a much wider end date to ensure we capture recent data
+            very_extended_end = (datetime.strptime(end, '%Y-%m-%d') + timedelta(days=30)).strftime('%Y-%m-%d')
+            df = yf.download(ticker, start=start, end=very_extended_end, auto_adjust=True, progress=False)
+            # If we get data but it's too far in the future, trim it to the requested end date
+            if not df.empty and df.index.max().date() > datetime.strptime(end, '%Y-%m-%d').date():
+                df = df[df.index <= end]
         if df.empty:
             return df
+        
+        # Handle MultiIndex columns properly
+        if isinstance(df.columns, pd.MultiIndex):
+            df = df.droplevel(1, axis=1)  # Remove the ticker level from MultiIndex
+        
         df = df[['Close']].rename(columns={'Close': 'close'})
         df = df[~df.index.duplicated(keep='first')]
         return df
@@ -714,9 +729,33 @@ if prices.index[-1].date() < end_date:
     st.write(f"- {source_ticker}: {src.index.min().date()} to {src.index.max().date()}")
     st.write(f"- {target_ticker}: {tgt.index.min().date()} to {tgt.index.max().date()}")
     st.write(f"- {comparison_ticker}: {cmp.index.min().date()} to {cmp.index.max().date()}")
+else:
+    # Show when data is up to date
+    st.success(f"✅ **Data is current**: Latest data through {prices.index[-1].strftime('%Y-%m-%d')}")
 
 
 prices['rsi'] = compute_rsi(prices['close_src'], rsi_len)
+
+# Check for recent RSI signals and display them prominently
+recent_days = 7  # Check last 7 days
+recent_data = prices.tail(recent_days)
+recent_signals = recent_data[recent_data['rsi'].notna()]
+
+if not recent_signals.empty:
+    # Check for high RSI signals (assuming user is looking for RSI > 80 based on their example)
+    high_rsi_threshold = 80
+    recent_high_rsi = recent_signals[recent_signals['rsi'] > high_rsi_threshold]
+    
+    if not recent_high_rsi.empty:
+        st.warning(f"🚨 **Recent RSI Signals Detected**: Found {len(recent_high_rsi)} RSI > {high_rsi_threshold} signals in the last {recent_days} days:")
+        for date, row in recent_high_rsi.iterrows():
+            st.write(f"• {date.strftime('%Y-%m-%d')}: RSI = {row['rsi']:.2f}")
+        st.write("These signals should be visible in the charts below.")
+    else:
+        # Show the highest RSI in recent period for context
+        max_recent_rsi = recent_signals['rsi'].max()
+        if pd.notna(max_recent_rsi):
+            st.info(f"ℹ️ **Recent RSI Context**: Highest RSI in last {recent_days} days was {max_recent_rsi:.2f} (no signals > {high_rsi_threshold})")
 
 # Forward returns aligned to entry day (t+1) to match equity curve logic
 fwd_ret_raw = forward_return(prices['close_tgt'], horizon)
