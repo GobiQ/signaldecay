@@ -578,8 +578,8 @@ with st.sidebar:
     st.subheader("Preconditions-only Mode")
 
     use_precond_only = st.checkbox(
-        "Use preconditions as the signal (ignore RSI logic)",
-        value=False,
+        "Use preconditions as the signal",
+        value=True,
         help="If ON: allocate to a chosen ticker whenever ALL preconditions are True; otherwise hold the fallback ticker. RSI settings are ignored for allocation and event marking."
     )
 
@@ -589,65 +589,85 @@ with st.sidebar:
         help="Only used when Preconditions-only mode is ON. This is the asset held during True periods."
     ).strip().upper()
 
+    precond_fallback_ticker = st.text_input(
+        "Ticker to HOLD when preconditions are False",
+        value="BIL",
+        help="Only used when Preconditions-only mode is ON. This is the asset held during False periods."
+    ).strip().upper()
+
     st.markdown("---")
     
-    source_ticker = st.text_input("Signal ticker (for RSI signal)", value="SPY", 
-                                 help="The ticker used to calculate RSI and generate trading signals. This is where the RSI condition is evaluated.").strip().upper()
-    target_ticker = st.text_input("Target ticker (to allocate / measure returns)", value="UVXY", 
-                                 help="The ticker you allocate to when the RSI signal condition is TRUE. This is what you buy when the signal triggers.").strip().upper()
-    comparison_ticker = st.text_input("Fallback ticker (held when signal condition is FALSE)", value="BIL", 
-                                     help="The ticker you hold when the RSI signal condition is FALSE. This is your alternative allocation (e.g., cash, bonds, or another asset).").strip().upper()
-    
-    rsi_len = st.number_input("RSI Days", min_value=2, max_value=200, value=10, step=1,
-                             help="Number of periods used to calculate RSI. Shorter periods (10-14) are more sensitive to recent price changes, while longer periods (20-30) are smoother and less noisy.")
-
-    signal_mode = st.radio(
-        "Signal type",
-        options=["Absolute RSI", "Percentile RSI → RSI figure"],
-        index=0,
-        help="Absolute RSI: Use a fixed RSI threshold (e.g., 30 or 70). Percentile RSI: Use a dynamic threshold based on historical RSI percentiles (adapts to market conditions)."
-    )
-
-    if signal_mode == "Absolute RSI":
-        rsi_threshold_input = st.text_input(
-            "RSI threshold",
-            value="80.0",
-            help="Fixed RSI threshold for signal generation. Values below 30 are considered oversold, above 70 are overbought. Enter as decimal (e.g., 80.5)"
-        )
+    # Only show RSI-related controls when NOT in preconditions-only mode
+    if not use_precond_only:
+        source_ticker = st.text_input("Signal ticker (for RSI signal)", value="SPY", 
+                                     help="The ticker used to calculate RSI and generate trading signals. This is where the RSI condition is evaluated.").strip().upper()
+        target_ticker = st.text_input("Target ticker (to allocate / measure returns)", value="UVXY", 
+                                     help="The ticker you allocate to when the RSI signal condition is TRUE. This is what you buy when the signal triggers.").strip().upper()
+        comparison_ticker = st.text_input("Fallback ticker (held when signal condition is FALSE)", value="BIL", 
+                                         help="The ticker you hold when the RSI signal condition is FALSE. This is your alternative allocation (e.g., cash, bonds, or another asset).").strip().upper()
         
-        # Convert text input to float with validation
-        try:
-            rsi_threshold = float(rsi_threshold_input)
-            if rsi_threshold < 0.0 or rsi_threshold > 100.0:
-                st.warning("RSI threshold must be between 0.0 and 100.0. Using 80.0 as default.")
+        rsi_len = st.number_input("RSI Days", min_value=2, max_value=200, value=10, step=1,
+                                 help="Number of periods used to calculate RSI. Shorter periods (10-14) are more sensitive to recent price changes, while longer periods (20-30) are smoother and less noisy.")
+
+        signal_mode = st.radio(
+            "Signal type",
+            options=["Absolute RSI", "Percentile RSI → RSI figure"],
+            index=0,
+            help="Absolute RSI: Use a fixed RSI threshold (e.g., 30 or 70). Percentile RSI: Use a dynamic threshold based on historical RSI percentiles (adapts to market conditions)."
+        )
+
+        if signal_mode == "Absolute RSI":
+            rsi_threshold_input = st.text_input(
+                "RSI threshold",
+                value="80.0",
+                help="Fixed RSI threshold for signal generation. Values below 30 are considered oversold, above 70 are overbought. Enter as decimal (e.g., 80.5)"
+            )
+            
+            # Convert text input to float with validation
+            try:
+                rsi_threshold = float(rsi_threshold_input)
+                if rsi_threshold < 0.0 or rsi_threshold > 100.0:
+                    st.warning("RSI threshold must be between 0.0 and 100.0. Using 80.0 as default.")
+                    rsi_threshold = 80.0
+            except ValueError:
+                st.warning("Invalid RSI threshold format. Using 80.0 as default.")
                 rsi_threshold = 80.0
-        except ValueError:
-            st.warning("Invalid RSI threshold format. Using 80.0 as default.")
-            rsi_threshold = 80.0
+            perc_scope = None
+            percentile = None
+            perc_window = None
+        else:
+            percentile = st.slider("Percentile (0–100)", min_value=0.0, max_value=100.0, value=90.0, step=0.5,
+                                  help="Percentile threshold for dynamic RSI calculation. 90th percentile means the signal triggers when RSI is in the top 10% of historical values. Higher percentiles = more selective signals.")
+            perc_scope = st.radio(
+                "Percentile scope",
+                options=["Whole dataset (fixed)", "Rolling (windowed)"],
+                index=0,
+                help="Whole dataset: one fixed threshold from the entire selected period. "
+                     "Rolling: threshold recomputed from the last N trading days (changes over time)."
+            )
+            if perc_scope == "Rolling (windowed)":
+                perc_window = st.number_input(
+                    "Rolling window (trading days)",
+                    min_value=30, max_value=1260, value=252, step=1,
+                    help="Number of trading days used to calculate the rolling percentile threshold. Longer windows provide more stable thresholds but adapt slower to regime changes."
+                )
+            else:
+                perc_window = None
+
+        operator = st.radio("Condition", options=["RSI ≤ threshold", "RSI ≥ threshold"], index=1,
+                           help="RSI ≤ threshold: Signal triggers when RSI is at or below threshold (oversold/mean reversion). RSI ≥ threshold: Signal triggers when RSI is at or above threshold (overbought/momentum).")
+    else:
+        # Set default values for preconditions-only mode
+        source_ticker = "SPY"
+        target_ticker = "UVXY" 
+        comparison_ticker = "BIL"
+        rsi_len = 10
+        signal_mode = "Absolute RSI"
+        rsi_threshold = 80.0
+        operator = "RSI ≥ threshold"
         perc_scope = None
         percentile = None
         perc_window = None
-    else:
-        percentile = st.slider("Percentile (0–100)", min_value=0.0, max_value=100.0, value=90.0, step=0.5,
-                              help="Percentile threshold for dynamic RSI calculation. 90th percentile means the signal triggers when RSI is in the top 10% of historical values. Higher percentiles = more selective signals.")
-        perc_scope = st.radio(
-            "Percentile scope",
-            options=["Whole dataset (fixed)", "Rolling (windowed)"],
-            index=0,
-            help="Whole dataset: one fixed threshold from the entire selected period. "
-                 "Rolling: threshold recomputed from the last N trading days (changes over time)."
-        )
-        if perc_scope == "Rolling (windowed)":
-            perc_window = st.number_input(
-                "Rolling window (trading days)",
-                min_value=30, max_value=1260, value=252, step=1,
-                help="Number of trading days used to calculate the rolling percentile threshold. Longer windows provide more stable thresholds but adapt slower to regime changes."
-            )
-        else:
-            perc_window = None
-
-    operator = st.radio("Condition", options=["RSI ≤ threshold", "RSI ≥ threshold"], index=1,
-                       help="RSI ≤ threshold: Signal triggers when RSI is at or below threshold (oversold/mean reversion). RSI ≥ threshold: Signal triggers when RSI is at or above threshold (overbought/momentum).")
     
     today = date.today()
     default_start = date(today.year-8, 1, 1)  # ~8 years by default
@@ -741,8 +761,13 @@ if not source_ticker or not target_ticker or not comparison_ticker:
     st.warning("Enter all three ticker symbols to begin.")
     st.stop()
 
-# Determine the effective target ticker depending on mode
-effective_target_ticker = precond_hold_ticker if use_precond_only else target_ticker
+# Determine the effective target and comparison tickers depending on mode
+if use_precond_only:
+    effective_target_ticker = precond_hold_ticker
+    effective_comparison_ticker = precond_fallback_ticker
+else:
+    effective_target_ticker = target_ticker
+    effective_comparison_ticker = comparison_ticker
 
 # Only run analysis if the Run Analysis button has been pressed
 if not st.session_state.get('analysis_run', False):
@@ -760,7 +785,7 @@ if auto_start:
     # Load all three tickers from the early start date
     src = load_prices(source_ticker, str(early_start), str(end_date))
     tgt = load_prices(effective_target_ticker, str(early_start), str(end_date))
-    cmp = load_prices(comparison_ticker, str(early_start), str(end_date))
+    cmp = load_prices(effective_comparison_ticker, str(early_start), str(end_date))
     
     if src.empty:
         st.error(f"❌ **No data found for source ticker: {source_ticker}**")
@@ -781,7 +806,7 @@ if auto_start:
         st.write("- Try the 'Clear Data Cache' button if you suspect caching issues")
         st.stop()
     if cmp.empty:
-        st.error(f"❌ **No data found for comparison ticker: {comparison_ticker}**")
+        st.error(f"❌ **No data found for comparison ticker: {effective_comparison_ticker}**")
         st.write("**Possible solutions:**")
         st.write("- Check if the ticker symbol is correct")
         st.write("- Try common alternatives:")
@@ -797,6 +822,15 @@ if auto_start:
         tgt.index.min().date(), 
         cmp.index.min().date()
     ]
+    
+    # In preconditions-only mode, also include the effective comparison ticker
+    if use_precond_only and effective_comparison_ticker != comparison_ticker:
+        try:
+            eff_cmp_data = load_prices_uncached(effective_comparison_ticker, str(early_start), str(end_date))
+            if not eff_cmp_data.empty:
+                all_ticker_dates.append(eff_cmp_data.index.min().date())
+        except Exception:
+            pass  # If we can't load it, just skip it
     
     # Add precondition ticker dates (handle pair + static)
     pre_list = st.session_state.get("preconditions", [])
@@ -838,13 +872,13 @@ if auto_start:
     # Reload data with the earliest possible start date
     src = load_prices(source_ticker, str(start_date), str(end_date))
     tgt = load_prices(effective_target_ticker, str(start_date), str(end_date))
-    cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
+    cmp = load_prices(effective_comparison_ticker, str(start_date), str(end_date))
     
 else:
     # Load all three tickers with user's selected start date
     src = load_prices(source_ticker, str(start_date), str(end_date))
     tgt = load_prices(effective_target_ticker, str(start_date), str(end_date))
-    cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
+    cmp = load_prices(effective_comparison_ticker, str(start_date), str(end_date))
     
     # Also check precondition tickers to ensure they have data in the selected range
     pre_list = st.session_state.get("preconditions", [])
@@ -865,7 +899,7 @@ else:
         st.error(f"No data for target ticker: {effective_target_ticker}")
         st.stop()
     if cmp.empty:
-        st.error(f"No data for comparison ticker: {comparison_ticker}")
+        st.error(f"No data for comparison ticker: {effective_comparison_ticker}")
         st.stop()
 
 # Ensure tz-naive DateTimeIndex
