@@ -518,11 +518,13 @@ with st.sidebar:
                     "Condition",
                     ["less_than", "greater_than", "less_equal", "greater_equal", "equal"],
                     index=0,
-                    format_func=lambda x: {"less_than":"RSI ≤ threshold" if x=="less_than" else
-                                           "RSI ≥ threshold" if x=="greater_than" else
-                                           "RSI ≤ threshold (inclusive)" if x=="less_equal" else
-                                           "RSI ≥ threshold (inclusive)" if x=="greater_equal" else
-                                           "RSI = threshold"}[x],
+                    format_func=lambda x: {
+                        "less_than": "RSI ≤ threshold",
+                        "greater_than": "RSI ≥ threshold", 
+                        "less_equal": "RSI ≤ threshold (inclusive)",
+                        "greater_equal": "RSI ≥ threshold (inclusive)",
+                        "equal": "RSI = threshold"
+                    }[x],
                 )
                 pc_thr = st.number_input("RSI threshold", min_value=0.0, max_value=100.0, value=80.0, step=0.5)
                 submitted = st.form_submit_button("Add")
