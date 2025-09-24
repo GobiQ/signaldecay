@@ -500,6 +500,8 @@ with st.sidebar:
     with col1:
         if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
             st.session_state.run_analysis = True
+            st.cache_data.clear()  # Clear cache like the manual button does
+            st.success("Cache cleared! Running analysis...")
             st.rerun()
     
     with col2:
@@ -668,9 +670,8 @@ if not st.session_state.get("run_analysis", False):
     st.info("👆 **Please click 'Run Analysis' to start the analysis**")
     st.stop()
 
-# Clear cache when running analysis (equivalent to manual cache clear)
-st.cache_data.clear()
-st.info(f"🔄 **Debug**: Running analysis - cache cleared for fresh data")
+# Analysis is running - cache was already cleared by the button
+st.info(f"🔄 **Debug**: Running analysis with fresh data")
 
 # Auto-adjust start date to earliest common date if requested
 if auto_start:
