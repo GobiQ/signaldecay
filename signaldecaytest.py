@@ -265,7 +265,11 @@ def build_precondition_mask(
     """
     msgs: list[str] = []
     if not preconditions:
-        return pd.Series(True, index=base_index), msgs  # no gating
+        return pd.Series(True, index=base_index, dtype=bool), msgs  # no gating
+
+    # Ensure we have a valid base_index
+    if len(base_index) == 0:
+        return pd.Series([], index=base_index, dtype=bool), msgs
 
     mask = pd.Series(True, index=base_index, dtype=bool)
 
@@ -300,6 +304,8 @@ def build_precondition_mask(
         # Ensure both series have the same index before combining
         mask = mask & cond_aligned  # Use & instead of &= to avoid inplace issues
 
+    # Final safety check: ensure mask has the correct index and dtype
+    mask = mask.reindex(base_index).fillna(False).astype(bool)
     return mask, msgs
 
 # -----------------------------
@@ -673,7 +679,9 @@ pc_mask, pc_msgs = build_precondition_mask(
 )
 
 # Apply mask (all preconditions must be True)
-prices['signal'] = prices['signal'] & pc_mask
+# Ensure pc_mask is properly aligned to prices.index
+pc_mask_aligned = pc_mask.reindex(prices.index).fillna(False).astype(bool)
+prices['signal'] = prices['signal'] & pc_mask_aligned
 
 # Surface any data messages
 for m in pc_msgs:
