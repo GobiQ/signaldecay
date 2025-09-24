@@ -578,7 +578,7 @@ with st.sidebar:
     st.subheader("Preconditions-only Mode")
 
     use_precond_only = st.checkbox(
-        "Use preconditions as the signal (ignore RSI logic)",
+        "Use preconditions as the signal",
         value=False,
         help="If ON: allocate to a chosen ticker whenever ALL preconditions are True; otherwise hold the fallback ticker. RSI settings are ignored for allocation and event marking."
     )
