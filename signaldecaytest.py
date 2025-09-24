@@ -479,6 +479,8 @@ with st.sidebar:
             })
             # Clear cache when adding a precondition
             st.cache_data.clear()
+            # Force a complete refresh by setting a flag
+            st.session_state.force_data_refresh = True
             # Add debug info
             st.info(f"🔍 **Debug**: Added precondition for {pc_tkr}. Total preconditions: {len(st.session_state.preconditions)}")
             st.rerun()
@@ -641,6 +643,11 @@ if not source_ticker or not target_ticker or not comparison_ticker:
     st.warning("Enter all three ticker symbols to begin.")
     st.stop()
 
+# Check if we need to force a data refresh
+force_refresh = st.session_state.get('force_data_refresh', False)
+if force_refresh:
+    st.session_state.force_data_refresh = False  # Reset the flag
+
 # Auto-adjust start date to earliest common date if requested
 if auto_start:
     # First, try to load data from a much earlier date to find the true earliest common date
@@ -648,9 +655,14 @@ if auto_start:
     early_start = date(1990, 1, 1)
     
     # Load all three tickers from the early start date
-    src = load_prices(source_ticker, str(early_start), str(end_date))
-    tgt = load_prices(target_ticker, str(early_start), str(end_date))
-    cmp = load_prices(comparison_ticker, str(early_start), str(end_date))
+    if force_refresh:
+        src = load_prices_uncached(source_ticker, str(early_start), str(end_date))
+        tgt = load_prices_uncached(target_ticker, str(early_start), str(end_date))
+        cmp = load_prices_uncached(comparison_ticker, str(early_start), str(end_date))
+    else:
+        src = load_prices(source_ticker, str(early_start), str(end_date))
+        tgt = load_prices(target_ticker, str(early_start), str(end_date))
+        cmp = load_prices(comparison_ticker, str(early_start), str(end_date))
     
     if src.empty:
         st.error(f"❌ **No data found for source ticker: {source_ticker}**")
@@ -714,15 +726,25 @@ if auto_start:
     
     
     # Reload data with the earliest possible start date
-    src = load_prices(source_ticker, str(start_date), str(end_date))
-    tgt = load_prices(target_ticker, str(start_date), str(end_date))
-    cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
+    if force_refresh:
+        src = load_prices_uncached(source_ticker, str(start_date), str(end_date))
+        tgt = load_prices_uncached(target_ticker, str(start_date), str(end_date))
+        cmp = load_prices_uncached(comparison_ticker, str(start_date), str(end_date))
+    else:
+        src = load_prices(source_ticker, str(start_date), str(end_date))
+        tgt = load_prices(target_ticker, str(start_date), str(end_date))
+        cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
     
 else:
     # Load all three tickers with user's selected start date
-    src = load_prices(source_ticker, str(start_date), str(end_date))
-    tgt = load_prices(target_ticker, str(start_date), str(end_date))
-    cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
+    if force_refresh:
+        src = load_prices_uncached(source_ticker, str(start_date), str(end_date))
+        tgt = load_prices_uncached(target_ticker, str(start_date), str(end_date))
+        cmp = load_prices_uncached(comparison_ticker, str(start_date), str(end_date))
+    else:
+        src = load_prices(source_ticker, str(start_date), str(end_date))
+        tgt = load_prices(target_ticker, str(start_date), str(end_date))
+        cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
     
     # Also check precondition tickers to ensure they have data in the selected range
     pre_list = st.session_state.get("preconditions", [])
@@ -829,6 +851,10 @@ else:
 # Optional: suppress signals before percentile threshold is defined (rolling case)
 if signal_mode != "Absolute RSI" and perc_scope == "Rolling (windowed)":
     prices.loc[prices['rsi_thresh'].isna(), 'signal'] = False
+
+# Debug: Show original signals before preconditions
+original_signal_count = int(prices['signal'].sum())
+st.info(f"🔍 **Debug**: Original signals before preconditions: {original_signal_count}")
 
 # --- Preconditions gating ---
 pre_list = st.session_state.get("preconditions", [])
