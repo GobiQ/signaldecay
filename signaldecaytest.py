@@ -492,11 +492,11 @@ with st.sidebar:
                 mode = p.get("mode", "static")
                 if mode == "pair":
                     sym = {"less_than":"<", "greater_than":">", "less_equal":"≤", "greater_equal":"≥", "equal":"="}[p.get("op","less_than")]
-                    st.write(f"• {p['lhs_ticker']} RSI({p.get('lhs_len', rsi_len)}) {sym} {p['rhs_ticker']} RSI({p.get('rhs_len', rsi_len)})")
+                    st.write(f"• {p['lhs_ticker']} RSI({p.get('lhs_len', 10)}) {sym} {p['rhs_ticker']} RSI({p.get('rhs_len', 10)})")
                 else:
                     comp = p.get("comparison","greater_than")
                     sym = {"less_than":"≤", "greater_than":"≥", "less_equal":"≤", "greater_equal":"≥", "equal":"="}[comp]
-                    ln = p.get("rsi_len", rsi_len)
+                    ln = p.get("rsi_len", 10)
                     st.write(f"• {p['signal_ticker']} RSI({ln}) {sym} {p['threshold']}")
             with cols[1]:
                 if st.button("🗑️", key=f"remove_pre_{i}"):
@@ -519,10 +519,10 @@ with st.sidebar:
                     ["less_than", "greater_than", "less_equal", "greater_equal", "equal"],
                     index=0,
                     format_func=lambda x: {
-                        "less_than": "RSI ≤ threshold",
-                        "greater_than": "RSI ≥ threshold", 
-                        "less_equal": "RSI ≤ threshold (inclusive)",
-                        "greater_equal": "RSI ≥ threshold (inclusive)",
+                        "less_than": "RSI < threshold",
+                        "greater_than": "RSI > threshold", 
+                        "less_equal": "RSI ≤ threshold",
+                        "greater_equal": "RSI ≥ threshold",
                         "equal": "RSI = threshold"
                     }[x],
                 )
@@ -1587,10 +1587,10 @@ with col2:
             mode = p.get("mode","static")
             if mode == "pair":
                 sym = {"less_than":"<","greater_than":">","less_equal":"≤","greater_equal":"≥","equal":"="}[p.get("op","less_than")]
-                st.write(f"• {p['lhs_ticker']} RSI({p.get('lhs_len', rsi_len)}) {sym} {p['rhs_ticker']} RSI({p.get('rhs_len', rsi_len)})")
+                st.write(f"• {p['lhs_ticker']} RSI({p.get('lhs_len', 10)}) {sym} {p['rhs_ticker']} RSI({p.get('rhs_len', 10)})")
             else:
                 sym = {"less_than":"≤","greater_than":"≥","less_equal":"≤","greater_equal":"≥","equal":"="}[p.get("comparison","greater_than")]
-                st.write(f"• {p['signal_ticker']} RSI({p.get('rsi_len', rsi_len)}) {sym} {p['threshold']}")
+                st.write(f"• {p['signal_ticker']} RSI({p.get('rsi_len', 10)}) {sym} {p['threshold']}")
 
     # Win rate display (only for fixed horizon mode)
     if edge_mode == "Fixed horizon (days)":
