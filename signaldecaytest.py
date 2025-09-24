@@ -428,6 +428,8 @@ with st.sidebar:
                 "comparison": pc_cmp,
                 "threshold": float(pc_thr),
             })
+            # Automatically clear cache when adding a precondition
+            st.cache_data.clear()
             st.rerun()
 
     # Bulk clear
