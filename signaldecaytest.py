@@ -492,7 +492,7 @@ with st.sidebar:
     if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
         st.cache_data.clear()  # Clear cache like the manual button does
         st.success("Cache cleared! Please refresh the page.")
-        st.stop()  # Stop execution like the manual button does
+        st.rerun()  # Rerun instead of stop
     
     # Show status
     st.info("👆 Click 'Run Analysis' to clear cache and refresh the page")
