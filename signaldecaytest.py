@@ -28,7 +28,7 @@ def compute_rsi(close: pd.Series, length: int = 14) -> pd.Series:
     return rsi
 
 @st.cache_data(ttl=3600, show_spinner=False)  # Reduced cache to 1 hour for fresher data
-def load_prices(ticker: str, start: str, end: str) -> pd.DataFrame:
+def load_prices(ticker: str, start: str, end: str, cache_buster: int = 0) -> pd.DataFrame:
     try:
         # Try multiple approaches to get the most recent data
         df = yf.download(ticker, start=start, end=end, auto_adjust=True, progress=False)
@@ -293,6 +293,7 @@ def build_precondition_mask(
     start_date: str,
     end_date: str,
     rsi_len: int,
+    cache_buster: int = 0,
 ) -> tuple[pd.Series, list[str]]:
     """
     Returns:
@@ -321,7 +322,7 @@ def build_precondition_mask(
             # Try to get data with a more aggressive end date to ensure we get recent data
             from datetime import datetime, timedelta
             extended_end = (datetime.strptime(str(end_date), '%Y-%m-%d') + timedelta(days=7)).strftime('%Y-%m-%d')
-            s = load_prices(tkr, str(start_date), extended_end)
+            s = load_prices(tkr, str(start_date), extended_end, cache_buster)
         except Exception:
             s = pd.DataFrame()
 
@@ -411,6 +412,10 @@ with st.sidebar:
                     st.session_state.preconditions.pop(i)
                     # Automatically clear cache when removing a precondition
                     st.cache_data.clear()
+                    # Force a complete refresh by updating session state
+                    if 'precondition_change_counter' not in st.session_state:
+                        st.session_state.precondition_change_counter = 0
+                    st.session_state.precondition_change_counter += 1
                     st.rerun()
     else:
         st.caption("Add optional RSI gates on other tickers that must also be true.")
@@ -432,6 +437,10 @@ with st.sidebar:
             })
             # Automatically clear cache when adding a precondition
             st.cache_data.clear()
+            # Force a complete refresh by updating session state
+            if 'precondition_change_counter' not in st.session_state:
+                st.session_state.precondition_change_counter = 0
+            st.session_state.precondition_change_counter += 1
             st.rerun()
 
     # Bulk clear
@@ -440,6 +449,10 @@ with st.sidebar:
             st.session_state.preconditions = []
             # Automatically clear cache when clearing all preconditions
             st.cache_data.clear()
+            # Force a complete refresh by updating session state
+            if 'precondition_change_counter' not in st.session_state:
+                st.session_state.precondition_change_counter = 0
+            st.session_state.precondition_change_counter += 1
             st.rerun()
 
     st.markdown("---")
@@ -592,6 +605,9 @@ if not source_ticker or not target_ticker or not comparison_ticker:
     st.warning("Enter all three ticker symbols to begin.")
     st.stop()
 
+# Get cache buster from session state
+cache_buster = st.session_state.get('precondition_change_counter', 0)
+
 # Auto-adjust start date to earliest common date if requested
 if auto_start:
     # First, try to load data from a much earlier date to find the true earliest common date
@@ -599,9 +615,9 @@ if auto_start:
     early_start = date(1990, 1, 1)
     
     # Load all three tickers from the early start date
-    src = load_prices(source_ticker, str(early_start), str(end_date))
-    tgt = load_prices(target_ticker, str(early_start), str(end_date))
-    cmp = load_prices(comparison_ticker, str(early_start), str(end_date))
+    src = load_prices(source_ticker, str(early_start), str(end_date), cache_buster)
+    tgt = load_prices(target_ticker, str(early_start), str(end_date), cache_buster)
+    cmp = load_prices(comparison_ticker, str(early_start), str(end_date), cache_buster)
     
     if src.empty:
         st.error(f"❌ **No data found for source ticker: {source_ticker}**")
@@ -646,7 +662,7 @@ if auto_start:
         tkr = p.get("signal_ticker", "").strip().upper()
         if tkr:
             try:
-                pc_data = load_prices(tkr, str(early_start), str(end_date))
+                pc_data = load_prices(tkr, str(early_start), str(end_date), cache_buster)
                 if not pc_data.empty:
                     all_ticker_dates.append(pc_data.index.min().date())
                     precondition_data_info.append(f"{tkr}: {pc_data.index.min().date()} to {pc_data.index.max().date()}")
@@ -665,15 +681,15 @@ if auto_start:
     
     
     # Reload data with the earliest possible start date
-    src = load_prices(source_ticker, str(start_date), str(end_date))
-    tgt = load_prices(target_ticker, str(start_date), str(end_date))
-    cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
+    src = load_prices(source_ticker, str(start_date), str(end_date), cache_buster)
+    tgt = load_prices(target_ticker, str(start_date), str(end_date), cache_buster)
+    cmp = load_prices(comparison_ticker, str(start_date), str(end_date), cache_buster)
     
 else:
     # Load all three tickers with user's selected start date
-    src = load_prices(source_ticker, str(start_date), str(end_date))
-    tgt = load_prices(target_ticker, str(start_date), str(end_date))
-    cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
+    src = load_prices(source_ticker, str(start_date), str(end_date), cache_buster)
+    tgt = load_prices(target_ticker, str(start_date), str(end_date), cache_buster)
+    cmp = load_prices(comparison_ticker, str(start_date), str(end_date), cache_buster)
     
     # Also check precondition tickers to ensure they have data in the selected range
     pre_list = st.session_state.get("preconditions", [])
@@ -681,7 +697,7 @@ else:
         tkr = p.get("signal_ticker", "").strip().upper()
         if tkr:
             try:
-                pc_data = load_prices(tkr, str(start_date), str(end_date))
+                pc_data = load_prices(tkr, str(start_date), str(end_date), cache_buster)
                 if pc_data.empty:
                     st.warning(f"⚠️ Precondition ticker {tkr} has no data in the selected date range ({start_date} to {end_date}). It will be treated as always False.")
             except Exception:
@@ -793,6 +809,7 @@ pc_mask, pc_msgs = build_precondition_mask(
     start_date=start_date,
     end_date=end_date,
     rsi_len=rsi_len,
+    cache_buster=cache_buster,
 )
 
 # Apply mask (all preconditions must be True)
