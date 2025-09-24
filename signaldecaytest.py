@@ -455,7 +455,9 @@ with st.sidebar:
                 st.write(f"• {p['signal_ticker']} RSI {sym} {p['threshold']}")
             with cols[1]:
                 if st.button("🗑️", key=f"remove_pre_{i}"):
-                    st.session_state.preconditions.pop(i)
+                    removed_pre = st.session_state.preconditions.pop(i)
+                    st.success(f"✅ Removed precondition: {removed_pre['signal_ticker']} RSI {'≤' if removed_pre['comparison'] == 'less_than' else '≥'} {removed_pre['threshold']}")
+                    st.rerun()
     else:
         st.caption("Add optional RSI gates on other tickers that must also be true.")
 
@@ -481,7 +483,10 @@ with st.sidebar:
     # Bulk clear
     if st.session_state.preconditions:
         if st.button("🗑️ Clear all preconditions", type="secondary"):
+            count = len(st.session_state.preconditions)
             st.session_state.preconditions = []
+            st.success(f"✅ Cleared all {count} preconditions")
+            st.rerun()
 
     st.markdown("---")
     
