@@ -248,12 +248,14 @@ def nw_bandwidth(n: int) -> int:
     """Newey-West bandwidth rule of thumb."""
     return int(np.clip(np.floor(4*((n/100.0)**(2/9))), 1, max(1, n-1)))
 
+@st.cache_data(ttl=24*3600, show_spinner=False)
 def build_precondition_mask(
     base_index: pd.DatetimeIndex,
     preconditions: list[dict],
     start_date: str,
     end_date: str,
     rsi_len: int,
+    cache_key: str = "",
 ) -> tuple[pd.Series, list[str]]:
     """
     Returns:
@@ -377,6 +379,9 @@ with st.sidebar:
             with cols[1]:
                 if st.button("🗑️", key=f"remove_pre_{i}"):
                     st.session_state.preconditions.pop(i)
+                    # Force re-computation by clearing relevant caches
+                    if 'precondition_cache_key' in st.session_state:
+                        del st.session_state['precondition_cache_key']
                     st.rerun()
     else:
         st.caption("Add optional RSI gates on other tickers that must also be true.")
@@ -396,12 +401,18 @@ with st.sidebar:
                 "comparison": pc_cmp,
                 "threshold": float(pc_thr),
             })
+            # Force re-computation by clearing relevant caches
+            if 'precondition_cache_key' in st.session_state:
+                del st.session_state['precondition_cache_key']
             st.rerun()
 
     # Bulk clear
     if st.session_state.preconditions:
         if st.button("🗑️ Clear all preconditions", type="secondary"):
             st.session_state.preconditions = []
+            # Force re-computation by clearing relevant caches
+            if 'precondition_cache_key' in st.session_state:
+                del st.session_state['precondition_cache_key']
             st.rerun()
 
     st.markdown("---")
@@ -732,6 +743,10 @@ if signal_mode != "Absolute RSI" and perc_scope == "Rolling (windowed)":
 # --- Preconditions gating ---
 pre_list = st.session_state.get("preconditions", [])
 
+# Create a cache key based on preconditions to force re-computation when they change
+precondition_cache_key = str(sorted([(p.get('signal_ticker', ''), p.get('comparison', ''), p.get('threshold', 0)) for p in pre_list]))
+st.session_state['precondition_cache_key'] = precondition_cache_key
+
 # We use the *analysis* period you already established (prices.index).
 # Note: We do not expand your auto-start to include these tickers (keeps changes minimal).
 # Days where a precondition ticker lacks data will be treated as False.
@@ -741,6 +756,7 @@ pc_mask, pc_msgs = build_precondition_mask(
     start_date=start_date,
     end_date=end_date,
     rsi_len=rsi_len,
+    cache_key=precondition_cache_key,
 )
 
 # Apply mask (all preconditions must be True)
