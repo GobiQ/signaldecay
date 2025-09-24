@@ -409,6 +409,8 @@ with st.sidebar:
             with cols[1]:
                 if st.button("🗑️", key=f"remove_pre_{i}"):
                     st.session_state.preconditions.pop(i)
+                    # Automatically clear cache when removing a precondition
+                    st.cache_data.clear()
                     st.rerun()
     else:
         st.caption("Add optional RSI gates on other tickers that must also be true.")
@@ -436,6 +438,8 @@ with st.sidebar:
     if st.session_state.preconditions:
         if st.button("🗑️ Clear all preconditions", type="secondary"):
             st.session_state.preconditions = []
+            # Automatically clear cache when clearing all preconditions
+            st.cache_data.clear()
             st.rerun()
 
     st.markdown("---")
