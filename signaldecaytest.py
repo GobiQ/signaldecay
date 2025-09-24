@@ -458,6 +458,8 @@ with st.sidebar:
                     st.session_state.preconditions.pop(i)
                     # Clear cache when removing a precondition
                     st.cache_data.clear()
+                    # Set a flag to force complete refresh
+                    st.session_state.preconditions_changed = True
                     st.rerun()
     else:
         st.caption("Add optional RSI gates on other tickers that must also be true.")
@@ -479,6 +481,8 @@ with st.sidebar:
             })
             # Clear cache when adding a precondition
             st.cache_data.clear()
+            # Set a flag to force complete refresh
+            st.session_state.preconditions_changed = True
             # Add debug info
             st.info(f"🔍 **Debug**: Added precondition for {pc_tkr}. Total preconditions: {len(st.session_state.preconditions)}")
             st.rerun()
@@ -489,6 +493,8 @@ with st.sidebar:
             st.session_state.preconditions = []
             # Clear cache when clearing all preconditions
             st.cache_data.clear()
+            # Set a flag to force complete refresh
+            st.session_state.preconditions_changed = True
             st.rerun()
 
     st.markdown("---")
@@ -641,11 +647,17 @@ if not source_ticker or not target_ticker or not comparison_ticker:
     st.warning("Enter all three ticker symbols to begin.")
     st.stop()
 
-# Check if we have preconditions - if so, clear cache for consistency
+# Check if we have preconditions - if so, clear cache BEFORE any data loading
 has_preconditions = len(st.session_state.get("preconditions", [])) > 0
-if has_preconditions:
-    st.cache_data.clear()  # Clear cache when preconditions are present
-    st.info(f"🔄 **Debug**: Preconditions detected - cache cleared for consistency")
+preconditions_changed = st.session_state.get("preconditions_changed", False)
+
+if has_preconditions or preconditions_changed:
+    st.cache_data.clear()  # Clear cache when preconditions are present or changed
+    if preconditions_changed:
+        st.session_state.preconditions_changed = False  # Reset the flag
+        st.info(f"🔄 **Debug**: Preconditions changed - cache cleared and flag reset")
+    else:
+        st.info(f"🔄 **Debug**: Preconditions detected - cache cleared BEFORE data loading")
 else:
     st.info(f"🔄 **Debug**: No preconditions - using cached data")
 
