@@ -460,21 +460,22 @@ with st.sidebar:
         st.caption("Add optional RSI gates on other tickers that must also be true.")
 
     with st.expander("➕ Add Precondition"):
-        pc_tkr = st.text_input("Precondition RSI ticker", value="QQQ", key="pc_tkr").strip().upper()
-        pc_cmp = st.selectbox(
-            "Condition", ["less_than", "greater_than"],
-            index=0,  # default ≤
-            format_func=lambda x: "RSI ≤ threshold" if x == "less_than" else "RSI ≥ threshold",
-            key="pc_cmp",
-        )
-        pc_thr = st.number_input("RSI threshold", min_value=0.0, max_value=100.0, value=80.0, step=0.5, key="pc_thr")
-        if st.button("Add", key="pc_add"):
-            st.session_state.preconditions.append({
-                "signal_ticker": pc_tkr,
-                "comparison": pc_cmp,
-                "threshold": float(pc_thr),
-            })
-            # Precondition added successfully
+        with st.form("add_precondition_form"):
+            pc_tkr = st.text_input("Precondition RSI ticker", value="QQQ").strip().upper()
+            pc_cmp = st.selectbox(
+                "Condition", ["less_than", "greater_than"],
+                index=0,  # default ≤
+                format_func=lambda x: "RSI ≤ threshold" if x == "less_than" else "RSI ≥ threshold",
+            )
+            pc_thr = st.number_input("RSI threshold", min_value=0.0, max_value=100.0, value=80.0, step=0.5)
+            submitted = st.form_submit_button("Add")
+            if submitted:
+                st.session_state.preconditions.append({
+                    "signal_ticker": pc_tkr,
+                    "comparison": pc_cmp,
+                    "threshold": float(pc_thr),
+                })
+                # Precondition added successfully
 
     # Bulk clear
     if st.session_state.preconditions:
