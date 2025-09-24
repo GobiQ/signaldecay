@@ -487,18 +487,6 @@ with st.sidebar:
 
     st.markdown("---")
     
-    # Run Analysis Button
-    st.subheader("Run Analysis")
-    if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
-        st.cache_data.clear()  # Clear cache like the manual button does
-        st.success("Cache cleared! Please refresh the page.")
-        st.rerun()  # Rerun instead of stop
-    
-    # Show status
-    st.info("👆 Click 'Run Analysis' to clear cache and refresh the page")
-    
-    st.markdown("---")
-    
     source_ticker = st.text_input("Signal ticker (for RSI signal)", value="SPY", 
                                  help="The ticker used to calculate RSI and generate trading signals. This is where the RSI condition is evaluated.").strip().upper()
     target_ticker = st.text_input("Target ticker (to allocate / measure returns)", value="UVXY", 
@@ -626,6 +614,12 @@ with st.sidebar:
     
     download_switch = st.checkbox("Enable CSV download of results", value=True,
                                  help="Allow downloading the analysis results as a CSV file containing all calculated values (RSI, signals, returns, etc.) for further analysis.")
+    
+    # Run Analysis Button (replaces the manual cache clearing)
+    if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
+        st.cache_data.clear()
+        st.success("Cache cleared! Please refresh the page.")
+        st.rerun()
     
     # Add cache clearing option for debugging
     if st.button("🔄 Clear Data Cache (if having ticker issues)"):
