@@ -624,6 +624,7 @@ with st.sidebar:
     # Big red "run analysis" button with identical functionality to clear data cache
     if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
         st.cache_data.clear()
+        st.session_state.analysis_run = True
         st.success("Cache cleared! Please refresh the page.")
         st.rerun()
     
@@ -636,7 +637,12 @@ if not source_ticker or not target_ticker or not comparison_ticker:
     st.warning("Enter all three ticker symbols to begin.")
     st.stop()
 
-# Run analysis automatically (cache clearing is handled by the Run Analysis button)
+# Only run analysis if the Run Analysis button has been pressed
+if not st.session_state.get('analysis_run', False):
+    st.info("👆 **Click the 'Run Analysis' button above to start the analysis.**")
+    st.stop()
+
+# Run analysis (triggered by Run Analysis button)
 
 # Auto-adjust start date to earliest common date if requested
 if auto_start:
