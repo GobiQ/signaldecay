@@ -363,13 +363,16 @@ def build_precondition_mask(
 
         def _cmp_series(a: pd.Series, b: pd.Series, op: str) -> pd.Series:
             op = op or "greater_than"
-            if op == "less_than":        return a <  b
-            if op == "greater_than":     return a >  b
-            if op == "less_equal":       return a <= b
-            if op == "greater_equal":    return a >= b
-            if op == "equal":            return a.eq(b)
+            # Align both series to the same index (union of both indices)
+            # This ensures we can perform the comparison without index alignment errors
+            a_aligned, b_aligned = a.align(b, join='outer')
+            if op == "less_than":        return a_aligned <  b_aligned
+            if op == "greater_than":     return a_aligned >  b_aligned
+            if op == "less_equal":       return a_aligned <= b_aligned
+            if op == "greater_equal":    return a_aligned >= b_aligned
+            if op == "equal":            return a_aligned.eq(b_aligned)
             # default
-            return a > b
+            return a_aligned > b_aligned
 
         if mode == "pair":
             lhs_tkr = p.get("lhs_ticker","").strip().upper()
