@@ -720,19 +720,32 @@ pc_mask, pc_msgs = build_precondition_mask(
 )
 
 # Apply mask (all preconditions must be True)
-# More robust alignment approach
+# Bypass pandas DataFrame assignment issues by working with underlying data
 try:
     # Ensure pc_mask is properly aligned to prices.index
     pc_mask_aligned = pc_mask.reindex(prices.index).fillna(False).astype(bool)
     
-    # Additional safety: ensure both series have exactly the same index
-    if not pc_mask_aligned.index.equals(prices['signal'].index):
-        # Force alignment by creating new series with identical indices
-        signal_series = pd.Series(prices['signal'].values, index=prices.index, dtype=bool)
-        mask_series = pd.Series(pc_mask_aligned.values, index=prices.index, dtype=bool)
-        prices['signal'] = signal_series & mask_series
-    else:
-        prices['signal'] = prices['signal'] & pc_mask_aligned
+    # Work directly with the underlying numpy arrays to avoid pandas issues
+    signal_values = prices['signal'].values
+    mask_values = pc_mask_aligned.values
+    
+    # Ensure both arrays have the same length
+    if len(signal_values) != len(mask_values):
+        st.error(f"❌ **Array length mismatch**: signal ({len(signal_values)}) vs mask ({len(mask_values)})")
+        st.write("**Debug info:**")
+        st.write(f"- prices['signal'] length: {len(prices['signal'])}")
+        st.write(f"- pc_mask length: {len(pc_mask)}")
+        st.write(f"- pc_mask_aligned length: {len(pc_mask_aligned)}")
+        st.write(f"- prices.index length: {len(prices.index)}")
+        st.write("**Solution**: Try refreshing the page or clearing the cache.")
+        st.stop()
+    
+    # Apply the mask using numpy operations
+    combined_signal = signal_values & mask_values
+    
+    # Create a new Series and assign it back
+    new_signal_series = pd.Series(combined_signal, index=prices.index, dtype=bool)
+    prices['signal'] = new_signal_series
         
 except Exception as e:
     st.error(f"❌ **Error applying preconditions**: {str(e)}")
