@@ -513,7 +513,7 @@ with st.sidebar:
         with tabs[0]:
             with st.form("add_precondition_form_static"):
                 pc_tkr = st.text_input("Precondition RSI ticker", value="QQQ").strip().upper()
-                pc_len = st.number_input("RSI length (days)", min_value=2, max_value=200, value=rsi_len, step=1)
+                pc_len = st.number_input("RSI length (days)", min_value=2, max_value=200, value=10, step=1)
                 pc_cmp = st.selectbox(
                     "Condition",
                     ["less_than", "greater_than", "less_equal", "greater_equal", "equal"],
@@ -543,10 +543,10 @@ with st.sidebar:
                 cols = st.columns(2)
                 with cols[0]:
                     lhs_t = st.text_input("Left ticker (LHS)", value="KMLM").strip().upper()
-                    lhs_len = st.number_input("LHS RSI length", min_value=2, max_value=200, value=rsi_len, step=1)
+                    lhs_len = st.number_input("LHS RSI length", min_value=2, max_value=200, value=10, step=1)
                 with cols[1]:
                     rhs_t = st.text_input("Right ticker (RHS)", value="XLK").strip().upper()
-                    rhs_len = st.number_input("RHS RSI length", min_value=2, max_value=200, value=rsi_len, step=1)
+                    rhs_len = st.number_input("RHS RSI length", min_value=2, max_value=200, value=10, step=1)
 
                 op = st.selectbox(
                     "Comparison",
