@@ -248,6 +248,58 @@ def nw_bandwidth(n: int) -> int:
     """Newey-West bandwidth rule of thumb."""
     return int(np.clip(np.floor(4*((n/100.0)**(2/9))), 1, max(1, n-1)))
 
+def build_precondition_mask(
+    base_index: pd.DatetimeIndex,
+    preconditions: list[dict],
+    start_date: str,
+    end_date: str,
+    rsi_len: int,
+) -> tuple[pd.Series, list[str]]:
+    """
+    Returns:
+      - mask: pd.Series[bool] indexed by base_index; True only when all preconditions pass.
+      - msgs: list of info/warning strings to show the user.
+    Behavior:
+      - If any precondition ticker has no data, it contributes all-False (and we note a message).
+      - All series are reindexed to base_index; missing values are False.
+    """
+    msgs: list[str] = []
+    if not preconditions:
+        return pd.Series(True, index=base_index), msgs  # no gating
+
+    mask = pd.Series(True, index=base_index, dtype=bool)
+
+    for p in preconditions:
+        tkr = p.get("signal_ticker", "").strip().upper()
+        cmp = p.get("comparison", "greater_than")
+        thr = float(p.get("threshold", 50.0))
+
+        try:
+            s = load_prices(tkr, str(start_date), str(end_date))
+        except Exception:
+            s = pd.DataFrame()
+
+        if s.empty or "close" not in s.columns:
+            msgs.append(f"⚠️ No data for precondition ticker {tkr}; treating as always False.")
+            this = pd.Series(False, index=base_index)
+            mask &= this
+            continue
+
+        s = s.copy()
+        s.index = pd.to_datetime(s.index).tz_localize(None)
+        rsi = compute_rsi(s["close"], rsi_len)
+
+        if cmp == "less_than":
+            cond = (rsi <= thr)
+        else:
+            cond = (rsi >= thr)
+
+        # align to main app trading calendar; missing → False
+        cond_aligned = cond.reindex(base_index).fillna(False).astype(bool)
+        mask &= cond_aligned
+
+    return mask, msgs
+
 # -----------------------------
 # UI
 # -----------------------------
@@ -258,6 +310,53 @@ st.caption("RSI Signal Statistics")
 
 with st.sidebar:
     st.header("Controls")
+    
+    # --- Preconditions UI ---
+    st.subheader("Preconditions")
+
+    # Keep a list in session state
+    if 'preconditions' not in st.session_state:
+        st.session_state.preconditions = []
+
+    # Render current preconditions
+    if st.session_state.preconditions:
+        st.write("**Current Preconditions (ALL must be true):**")
+        for i, p in enumerate(st.session_state.preconditions):
+            sym = "≤" if p['comparison'] == "less_than" else "≥"
+            cols = st.columns([6, 1])
+            with cols[0]:
+                st.write(f"• {p['signal_ticker']} RSI {sym} {p['threshold']}")
+            with cols[1]:
+                if st.button("🗑️", key=f"remove_pre_{i}"):
+                    st.session_state.preconditions.pop(i)
+                    st.rerun()
+    else:
+        st.caption("Add optional RSI gates on other tickers that must also be true.")
+
+    with st.expander("➕ Add Precondition"):
+        pc_tkr = st.text_input("Precondition RSI ticker", value="QQQ", key="pc_tkr").strip().upper()
+        pc_cmp = st.selectbox(
+            "Condition", ["less_than", "greater_than"],
+            index=1,  # default ≥
+            format_func=lambda x: "RSI ≤ threshold" if x == "less_than" else "RSI ≥ threshold",
+            key="pc_cmp",
+        )
+        pc_thr = st.number_input("RSI threshold", min_value=0.0, max_value=100.0, value=80.0, step=0.5, key="pc_thr")
+        if st.button("Add", key="pc_add"):
+            st.session_state.preconditions.append({
+                "signal_ticker": pc_tkr,
+                "comparison": pc_cmp,
+                "threshold": float(pc_thr),
+            })
+            st.rerun()
+
+    # Bulk clear
+    if st.session_state.preconditions:
+        if st.button("🗑️ Clear all preconditions", type="secondary"):
+            st.session_state.preconditions = []
+            st.rerun()
+
+    st.markdown("---")
     
     source_ticker = st.text_input("Signal ticker (for RSI signal)", value="SPY", 
                                  help="The ticker used to calculate RSI and generate trading signals. This is where the RSI condition is evaluated.").strip().upper()
@@ -556,6 +655,27 @@ else:
 # Optional: suppress signals before percentile threshold is defined (rolling case)
 if signal_mode != "Absolute RSI" and perc_scope == "Rolling (windowed)":
     prices.loc[prices['rsi_thresh'].isna(), 'signal'] = False
+
+# --- Preconditions gating ---
+pre_list = st.session_state.get("preconditions", [])
+
+# We use the *analysis* period you already established (prices.index).
+# Note: We do not expand your auto-start to include these tickers (keeps changes minimal).
+# Days where a precondition ticker lacks data will be treated as False.
+pc_mask, pc_msgs = build_precondition_mask(
+    base_index=prices.index,
+    preconditions=pre_list,
+    start_date=start_date,
+    end_date=end_date,
+    rsi_len=rsi_len,
+)
+
+# Apply mask (all preconditions must be True)
+prices['signal'] = prices['signal'] & pc_mask
+
+# Surface any data messages
+for m in pc_msgs:
+    st.info(m)
 
 # Calculate excess returns (target minus comparison) for signal events - entry-aligned
 prices['event_excess'] = np.where(prices['signal'], prices['fwd_ret_entry'] - prices['fwd_ret_cmp_entry'], np.nan)
@@ -1108,6 +1228,13 @@ with col2:
     st.markdown("**Threshold reference**")
     st.write(f"Signal on **{source_ticker}**, returns on **{target_ticker}**.")
     st.write(thresh_note)
+    
+    # Show active preconditions
+    if st.session_state.get("preconditions"):
+        st.write("**Preconditions (ALL must hold):**")
+        for p in st.session_state.preconditions:
+            sym = "≤" if p['comparison'] == "less_than" else "≥"
+            st.write(f"• {p['signal_ticker']} RSI {sym} {p['threshold']}")
 
     # Win rate display (only for fixed horizon mode)
     if edge_mode == "Fixed horizon (days)":
