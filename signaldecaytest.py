@@ -725,9 +725,23 @@ try:
     # Ensure pc_mask is properly aligned to prices.index
     pc_mask_aligned = pc_mask.reindex(prices.index).fillna(False).astype(bool)
     
+    # Debug: Check the shape of pc_mask_aligned
+    if hasattr(pc_mask_aligned, 'shape') and len(pc_mask_aligned.shape) > 1:
+        st.warning(f"⚠️ **Unexpected shape detected**: pc_mask_aligned has shape {pc_mask_aligned.shape}")
+        st.write("**Debug info:**")
+        st.write(f"- pc_mask_aligned type: {type(pc_mask_aligned)}")
+        st.write(f"- pc_mask_aligned shape: {pc_mask_aligned.shape}")
+        st.write(f"- pc_mask_aligned values shape: {pc_mask_aligned.values.shape}")
+        # Force it to be 1D
+        pc_mask_aligned = pc_mask_aligned.iloc[:, 0] if len(pc_mask_aligned.shape) > 1 else pc_mask_aligned
+    
     # Work directly with the underlying numpy arrays to avoid pandas issues
     signal_values = prices['signal'].values
     mask_values = pc_mask_aligned.values
+    
+    # Ensure we have 1D arrays and flatten if necessary
+    signal_values = signal_values.flatten()
+    mask_values = mask_values.flatten()
     
     # Ensure both arrays have the same length
     if len(signal_values) != len(mask_values):
@@ -737,6 +751,8 @@ try:
         st.write(f"- pc_mask length: {len(pc_mask)}")
         st.write(f"- pc_mask_aligned length: {len(pc_mask_aligned)}")
         st.write(f"- prices.index length: {len(prices.index)}")
+        st.write(f"- signal_values shape: {signal_values.shape}")
+        st.write(f"- mask_values shape: {mask_values.shape}")
         st.write("**Solution**: Try refreshing the page or clearing the cache.")
         st.stop()
     
