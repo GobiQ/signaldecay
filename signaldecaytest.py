@@ -274,10 +274,13 @@ def build_precondition_mask(
     mask = pd.Series(True, index=base_index, dtype=bool)
     
 
-    for p in preconditions:
+    for i, p in enumerate(preconditions):
         tkr = p.get("signal_ticker", "").strip().upper()
         cmp = p.get("comparison", "greater_than")
         thr = float(p.get("threshold", 50.0))
+        
+        # Debug: Track each precondition
+        msgs.append(f"Processing precondition {i+1}: {tkr} RSI {'≤' if cmp == 'less_than' else '≥'} {thr}")
 
         try:
             s = load_prices(tkr, str(start_date), str(end_date))
@@ -311,6 +314,11 @@ def build_precondition_mask(
         
         # Ensure both series have the same index before combining
         mask = mask & cond_aligned  # Use & instead of &= to avoid inplace issues
+        
+        # Debug: Show mask statistics after this precondition
+        true_count = mask.sum()
+        total_count = len(mask)
+        msgs.append(f"After {tkr}: {true_count}/{total_count} days still pass ({true_count/total_count:.1%})")
 
     # Final safety check: ensure mask has the correct index and dtype
     try:
@@ -775,6 +783,17 @@ except Exception as e:
 # Surface any data messages
 for m in pc_msgs:
     st.info(m)
+
+# Debug: Show precondition computation info
+if pre_list:
+    st.write(f"**Debug**: Processing {len(pre_list)} preconditions")
+    for i, p in enumerate(pre_list):
+        st.write(f"- {i+1}. {p['signal_ticker']} RSI {'≤' if p['comparison'] == 'less_than' else '≥'} {p['threshold']}")
+    
+    # Show the final mask statistics
+    total_days = len(pc_mask)
+    true_days = pc_mask.sum()
+    st.write(f"**Precondition mask**: {true_days}/{total_days} days pass all preconditions ({true_days/total_days:.1%})")
 
 # Calculate excess returns (target minus comparison) for signal events - entry-aligned
 prices['event_excess'] = np.where(prices['signal'], prices['fwd_ret_entry'] - prices['fwd_ret_cmp_entry'], np.nan)
