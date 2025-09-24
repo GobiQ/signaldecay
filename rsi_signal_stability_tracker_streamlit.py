@@ -457,6 +457,15 @@ cmp_renamed = cmp.rename(columns={'close': 'close_cmp'})
 prices = src_renamed.join(tgt_renamed, how="inner")
 prices = prices.join(cmp_renamed, how="inner")
 
+# Check if we have any overlapping data
+if prices.empty:
+    st.error("❌ **No overlapping trading days found** between the three tickers. Please check:")
+    st.write(f"- {source_ticker}: {len(src)} trading days from {src.index.min().date()} to {src.index.max().date()}")
+    st.write(f"- {target_ticker}: {len(tgt)} trading days from {tgt.index.min().date()} to {tgt.index.max().date()}")
+    st.write(f"- {comparison_ticker}: {len(cmp)} trading days from {cmp.index.min().date()} to {cmp.index.max().date()}")
+    st.write("**Solution**: Try adjusting the date range or using different tickers that have overlapping trading periods.")
+    st.stop()
+
 # Data summary banner
 st.success(f"📊 **Data loaded successfully**: {len(prices)} trading days from {prices.index[0].strftime('%Y-%m-%d')} to {prices.index[-1].strftime('%Y-%m-%d')}")
 
