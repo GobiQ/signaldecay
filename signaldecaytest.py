@@ -272,6 +272,10 @@ def build_precondition_mask(
         return pd.Series([], index=base_index, dtype=bool), msgs
 
     mask = pd.Series(True, index=base_index, dtype=bool)
+    
+    # Debug: Check initial mask type
+    if isinstance(mask, pd.DataFrame):
+        msgs.append("⚠️ Initial mask is DataFrame instead of Series")
 
     for p in preconditions:
         tkr = p.get("signal_ticker", "").strip().upper()
@@ -293,14 +297,35 @@ def build_precondition_mask(
         s = s.copy()
         s.index = pd.to_datetime(s.index).tz_localize(None)
         rsi = compute_rsi(s["close"], rsi_len)
+        
+        # Debug: Check RSI type
+        if isinstance(rsi, pd.DataFrame):
+            msgs.append(f"⚠️ RSI is DataFrame for {tkr}")
 
         if cmp == "less_than":
             cond = (rsi <= thr)
         else:
             cond = (rsi >= thr)
+            
+        # Debug: Check condition type
+        if isinstance(cond, pd.DataFrame):
+            msgs.append(f"⚠️ Condition is DataFrame for {tkr}")
 
         # align to main app trading calendar; missing → False
         cond_aligned = cond.reindex(base_index).fillna(False).astype(bool)
+        
+        # Debug: Check types before combining
+        if isinstance(mask, pd.DataFrame):
+            msgs.append(f"⚠️ Mask became DataFrame before combining with {tkr}")
+        if isinstance(cond_aligned, pd.DataFrame):
+            msgs.append(f"⚠️ cond_aligned is DataFrame for {tkr}")
+        
+        # Ensure both are Series before combining
+        if isinstance(mask, pd.DataFrame):
+            mask = mask.iloc[:, 0] if mask.shape[1] > 0 else pd.Series([False] * len(base_index), index=base_index, dtype=bool)
+        if isinstance(cond_aligned, pd.DataFrame):
+            cond_aligned = cond_aligned.iloc[:, 0] if cond_aligned.shape[1] > 0 else pd.Series([False] * len(base_index), index=base_index, dtype=bool)
+        
         # Ensure both series have the same index before combining
         mask = mask & cond_aligned  # Use & instead of &= to avoid inplace issues
 
