@@ -305,7 +305,18 @@ def build_precondition_mask(
         mask = mask & cond_aligned  # Use & instead of &= to avoid inplace issues
 
     # Final safety check: ensure mask has the correct index and dtype
-    mask = mask.reindex(base_index).fillna(False).astype(bool)
+    try:
+        mask = mask.reindex(base_index).fillna(False).astype(bool)
+        # Ensure the mask has exactly the same length as base_index
+        if len(mask) != len(base_index):
+            # Force correct length by creating a new series
+            mask = pd.Series([False] * len(base_index), index=base_index, dtype=bool)
+            msgs.append("⚠️ Precondition mask length mismatch - using all-False mask")
+    except Exception as e:
+        # If anything goes wrong, return a safe all-False mask
+        mask = pd.Series([False] * len(base_index), index=base_index, dtype=bool)
+        msgs.append(f"⚠️ Error in precondition mask creation: {str(e)} - using all-False mask")
+    
     return mask, msgs
 
 # -----------------------------
@@ -709,16 +720,30 @@ pc_mask, pc_msgs = build_precondition_mask(
 )
 
 # Apply mask (all preconditions must be True)
-# Ensure pc_mask is properly aligned to prices.index
-pc_mask_aligned = pc_mask.reindex(prices.index).fillna(False).astype(bool)
-
-# Safety check: ensure both series have the same length
-if len(prices['signal']) != len(pc_mask_aligned):
-    st.error(f"❌ **Length mismatch detected**: prices signal ({len(prices['signal'])}) vs pc_mask ({len(pc_mask_aligned)})")
-    st.write("This should not happen with the updated auto-start logic. Please try refreshing the page.")
+# More robust alignment approach
+try:
+    # Ensure pc_mask is properly aligned to prices.index
+    pc_mask_aligned = pc_mask.reindex(prices.index).fillna(False).astype(bool)
+    
+    # Additional safety: ensure both series have exactly the same index
+    if not pc_mask_aligned.index.equals(prices['signal'].index):
+        # Force alignment by creating new series with identical indices
+        signal_series = pd.Series(prices['signal'].values, index=prices.index, dtype=bool)
+        mask_series = pd.Series(pc_mask_aligned.values, index=prices.index, dtype=bool)
+        prices['signal'] = signal_series & mask_series
+    else:
+        prices['signal'] = prices['signal'] & pc_mask_aligned
+        
+except Exception as e:
+    st.error(f"❌ **Error applying preconditions**: {str(e)}")
+    st.write("**Debug info:**")
+    st.write(f"- prices['signal'] length: {len(prices['signal'])}")
+    st.write(f"- prices['signal'] index length: {len(prices['signal'].index)}")
+    st.write(f"- pc_mask length: {len(pc_mask)}")
+    st.write(f"- pc_mask index length: {len(pc_mask.index)}")
+    st.write(f"- prices.index length: {len(prices.index)}")
+    st.write("**Solution**: Try refreshing the page or clearing the cache.")
     st.stop()
-
-prices['signal'] = prices['signal'] & pc_mask_aligned
 
 # Surface any data messages
 for m in pc_msgs:
