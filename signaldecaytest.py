@@ -60,7 +60,13 @@ def rolling_signal_edge(event_returns: pd.Series, window: int, min_events: int =
     # Sum of returns across events within the window
     event_sum = event_returns.fillna(0.0).rolling(window, min_periods=1).sum()
     edge = event_sum / event_counts.replace(0, np.nan)
+    
+    # For recent data (last 30 days), use a more lenient min_events requirement
+    recent_threshold = max(1, min_events // 2)  # Use half the min_events for recent data
+    recent_mask = event_counts.index >= (event_counts.index[-1] - pd.Timedelta(days=30))
     edge[event_counts < min_events] = np.nan
+    edge[(event_counts < recent_threshold) & recent_mask] = np.nan  # Apply lenient threshold to recent data
+    
     return edge
 
 def rolling_win_rate(event_returns: pd.Series, window: int, min_events: int = 10, win_threshold: float = 0.0) -> pd.Series:
@@ -70,7 +76,13 @@ def rolling_win_rate(event_returns: pd.Series, window: int, min_events: int = 10
     wins = is_win.rolling(window, min_periods=1).sum()
     count = is_event.rolling(window, min_periods=1).sum()
     wr = wins / count.replace(0, np.nan)
+    
+    # For recent data (last 30 days), use a more lenient min_events requirement
+    recent_threshold = max(1, min_events // 2)  # Use half the min_events for recent data
+    recent_mask = count.index >= (count.index[-1] - pd.Timedelta(days=30))
     wr[count < min_events] = np.nan
+    wr[(count < recent_threshold) & recent_mask] = np.nan  # Apply lenient threshold to recent data
+    
     return wr
 
 def segment_true_runs(mask: pd.Series) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
@@ -476,7 +488,7 @@ with st.sidebar:
     else:
         start_date = st.date_input("Start date", value=default_start, max_value=today - timedelta(days=1))
     
-    end_date = st.date_input("End date", value=today)
+    end_date = st.date_input("End date", value=today + timedelta(days=1))
 
     edge_mode = st.radio(
         "Edge mode",
@@ -673,6 +685,10 @@ if prices.empty:
 
 # Data summary banner
 st.success(f"📊 **Data loaded successfully**: {len(prices)} trading days from {prices.index[0].strftime('%Y-%m-%d')} to {prices.index[-1].strftime('%Y-%m-%d')}")
+
+# Debug: Show date range info
+if prices.index[-1].date() < end_date:
+    st.info(f"ℹ️ **Note**: Data ends on {prices.index[-1].strftime('%Y-%m-%d')}, but you requested data until {end_date.strftime('%Y-%m-%d')}. This is normal - yfinance may not have data for the most recent dates yet.")
 
 
 prices['rsi'] = compute_rsi(prices['close_src'], rsi_len)
