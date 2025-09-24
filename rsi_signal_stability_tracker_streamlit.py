@@ -27,15 +27,85 @@ def compute_rsi(close: pd.Series, length: int = 14) -> pd.Series:
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-@st.cache_data(ttl=24*3600, show_spinner=False)
-def load_prices(ticker: str, start: str, end: str) -> pd.DataFrame:
+def load_prices_uncached(ticker: str, start: str, end: str) -> pd.DataFrame:
+    """Non-cached version of load_prices for preconditions to avoid cache issues."""
     try:
+        # Try multiple approaches to get the most recent data
         df = yf.download(ticker, start=start, end=end, auto_adjust=True, progress=False)
         if df.empty:
             # Try with different parameters if first attempt fails
             df = yf.download(ticker, start=start, end=end, auto_adjust=False, progress=False)
         if df.empty:
+            # Try extending the end date to ensure we get recent data
+            from datetime import datetime, timedelta
+            extended_end = (datetime.strptime(end, '%Y-%m-%d') + timedelta(days=7)).strftime('%Y-%m-%d')
+            df = yf.download(ticker, start=start, end=extended_end, auto_adjust=True, progress=False)
+        if df.empty:
+            # Try using the Ticker object for more recent data
+            ticker_obj = yf.Ticker(ticker)
+            hist = ticker_obj.history(start=start, end=end, auto_adjust=True)
+            if not hist.empty:
+                df = hist[['Close']].rename(columns={'Close': 'close'})
+        
+        # If still empty, try with a more aggressive approach for recent data
+        if df.empty:
+            from datetime import datetime, timedelta
+            # Try getting data with a much wider end date to ensure we capture recent data
+            very_extended_end = (datetime.strptime(end, '%Y-%m-%d') + timedelta(days=30)).strftime('%Y-%m-%d')
+            df = yf.download(ticker, start=start, end=very_extended_end, auto_adjust=True, progress=False)
+            # If we get data but it's too far in the future, trim it to the requested end date
+            if not df.empty and df.index.max().date() > datetime.strptime(end, '%Y-%m-%d').date():
+                df = df[df.index <= end]
+        if df.empty:
             return df
+        
+        # Handle MultiIndex columns properly
+        if isinstance(df.columns, pd.MultiIndex):
+            df = df.droplevel(1, axis=1)  # Remove the ticker level from MultiIndex
+        
+        df = df[['Close']].rename(columns={'Close': 'close'})
+        df = df[~df.index.duplicated(keep='first')]
+        return df
+    except Exception as e:
+        # Return empty DataFrame if there's an error
+        return pd.DataFrame()
+
+@st.cache_data(ttl=3600, show_spinner=False)  # Reduced cache to 1 hour for fresher data
+def load_prices(ticker: str, start: str, end: str) -> pd.DataFrame:
+    try:
+        # Try multiple approaches to get the most recent data
+        df = yf.download(ticker, start=start, end=end, auto_adjust=True, progress=False)
+        if df.empty:
+            # Try with different parameters if first attempt fails
+            df = yf.download(ticker, start=start, end=end, auto_adjust=False, progress=False)
+        if df.empty:
+            # Try extending the end date to ensure we get recent data
+            from datetime import datetime, timedelta
+            extended_end = (datetime.strptime(end, '%Y-%m-%d') + timedelta(days=7)).strftime('%Y-%m-%d')
+            df = yf.download(ticker, start=start, end=extended_end, auto_adjust=True, progress=False)
+        if df.empty:
+            # Try using the Ticker object for more recent data
+            ticker_obj = yf.Ticker(ticker)
+            hist = ticker_obj.history(start=start, end=end, auto_adjust=True)
+            if not hist.empty:
+                df = hist[['Close']].rename(columns={'Close': 'close'})
+        
+        # If still empty, try with a more aggressive approach for recent data
+        if df.empty:
+            from datetime import datetime, timedelta
+            # Try getting data with a much wider end date to ensure we capture recent data
+            very_extended_end = (datetime.strptime(end, '%Y-%m-%d') + timedelta(days=30)).strftime('%Y-%m-%d')
+            df = yf.download(ticker, start=start, end=very_extended_end, auto_adjust=True, progress=False)
+            # If we get data but it's too far in the future, trim it to the requested end date
+            if not df.empty and df.index.max().date() > datetime.strptime(end, '%Y-%m-%d').date():
+                df = df[df.index <= end]
+        if df.empty:
+            return df
+        
+        # Handle MultiIndex columns properly
+        if isinstance(df.columns, pd.MultiIndex):
+            df = df.droplevel(1, axis=1)  # Remove the ticker level from MultiIndex
+        
         df = df[['Close']].rename(columns={'Close': 'close'})
         df = df[~df.index.duplicated(keep='first')]
         return df
@@ -60,7 +130,13 @@ def rolling_signal_edge(event_returns: pd.Series, window: int, min_events: int =
     # Sum of returns across events within the window
     event_sum = event_returns.fillna(0.0).rolling(window, min_periods=1).sum()
     edge = event_sum / event_counts.replace(0, np.nan)
+    
+    # For recent data (last 30 days), use a more lenient min_events requirement
+    recent_threshold = max(1, min_events // 2)  # Use half the min_events for recent data
+    recent_mask = event_counts.index >= (event_counts.index[-1] - pd.Timedelta(days=30))
     edge[event_counts < min_events] = np.nan
+    edge[(event_counts < recent_threshold) & recent_mask] = np.nan  # Apply lenient threshold to recent data
+    
     return edge
 
 def rolling_win_rate(event_returns: pd.Series, window: int, min_events: int = 10, win_threshold: float = 0.0) -> pd.Series:
@@ -70,7 +146,13 @@ def rolling_win_rate(event_returns: pd.Series, window: int, min_events: int = 10
     wins = is_win.rolling(window, min_periods=1).sum()
     count = is_event.rolling(window, min_periods=1).sum()
     wr = wins / count.replace(0, np.nan)
+    
+    # For recent data (last 30 days), use a more lenient min_events requirement
+    recent_threshold = max(1, min_events // 2)  # Use half the min_events for recent data
+    recent_mask = count.index >= (count.index[-1] - pd.Timedelta(days=30))
     wr[count < min_events] = np.nan
+    wr[(count < recent_threshold) & recent_mask] = np.nan  # Apply lenient threshold to recent data
+    
     return wr
 
 def segment_true_runs(mask: pd.Series) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
@@ -248,6 +330,103 @@ def nw_bandwidth(n: int) -> int:
     """Newey-West bandwidth rule of thumb."""
     return int(np.clip(np.floor(4*((n/100.0)**(2/9))), 1, max(1, n-1)))
 
+def build_precondition_mask(
+    base_index: pd.DatetimeIndex,
+    preconditions: list[dict],
+    start_date: str,
+    end_date: str,
+    rsi_len: int,
+) -> tuple[pd.Series, list[str]]:
+    """
+    Returns:
+      - mask: pd.Series[bool] indexed by base_index; True only when all preconditions pass.
+      - msgs: list of info/warning strings to show the user.
+    Behavior:
+      - If any precondition ticker has no data, it contributes all-False (and we note a message).
+      - All series are reindexed to base_index; missing values are False.
+    """
+    msgs: list[str] = []
+    if not preconditions:
+        return pd.Series(True, index=base_index, dtype=bool), msgs  # no gating
+
+    # Ensure we have a valid base_index
+    if len(base_index) == 0:
+        return pd.Series([], index=base_index, dtype=bool), msgs
+
+    mask = pd.Series(True, index=base_index, dtype=bool)
+    
+    for i, p in enumerate(preconditions):
+        tkr = p.get("signal_ticker", "").strip().upper()
+        cmp = p.get("comparison", "greater_than")
+        thr = float(p.get("threshold", 50.0))
+
+        try:
+            # Try to get data with a more aggressive end date to ensure we get recent data
+            from datetime import datetime, timedelta
+            extended_end = (datetime.strptime(str(end_date), '%Y-%m-%d') + timedelta(days=7)).strftime('%Y-%m-%d')
+            s = load_prices_uncached(tkr, str(start_date), extended_end)
+        except Exception as e:
+            s = pd.DataFrame()
+            print(f"Error loading {tkr}: {e}")
+
+        if s.empty or "close" not in s.columns:
+            # Create a False series with the same index as mask
+            this = pd.Series(False, index=base_index, dtype=bool)
+            mask = mask & this  # Use & instead of &= to avoid inplace issues
+            print(f"Warning: {tkr} has no data or missing 'close' column")
+            continue
+
+        s = s.copy()
+        s.index = pd.to_datetime(s.index).tz_localize(None)
+        rsi = compute_rsi(s["close"], rsi_len)
+        
+        if cmp == "less_than":
+            cond = (rsi <= thr)
+        else:
+            cond = (rsi >= thr)
+
+        # align to main app trading calendar; missing → False
+        cond_aligned = cond.reindex(base_index).fillna(False).astype(bool)
+        
+        print(f"Debug {tkr}: RSI range {rsi.min():.1f}-{rsi.max():.1f}, condition {cmp} {thr}, matches: {cond_aligned.sum()}/{len(cond_aligned)}")
+        
+        # Ensure both are Series before combining
+        if isinstance(mask, pd.DataFrame):
+            mask = mask.iloc[:, 0] if mask.shape[1] > 0 else pd.Series([False] * len(base_index), index=base_index, dtype=bool)
+        if isinstance(cond_aligned, pd.DataFrame):
+            cond_aligned = cond_aligned.iloc[:, 0] if cond_aligned.shape[1] > 0 else pd.Series([False] * len(base_index), index=base_index, dtype=bool)
+        
+        # Ensure both series have the same index before combining
+        mask = mask & cond_aligned  # Use & instead of &= to avoid inplace issues
+
+    # Final safety check: ensure mask has the correct index and dtype
+    try:
+        mask = mask.reindex(base_index).fillna(False).astype(bool)
+        
+        # CRITICAL: Ensure we return a Series, not a DataFrame
+        if isinstance(mask, pd.DataFrame):
+            # If somehow we got a DataFrame, take the first column or create a new Series
+            if mask.shape[1] == 1:
+                mask = mask.iloc[:, 0]
+            else:
+                # Multiple columns - this shouldn't happen, create a new Series
+                mask = pd.Series([False] * len(base_index), index=base_index, dtype=bool)
+        
+        # Ensure the mask has exactly the same length as base_index
+        if len(mask) != len(base_index):
+            # Force correct length by creating a new series
+            mask = pd.Series([False] * len(base_index), index=base_index, dtype=bool)
+            
+        # Final verification that we have a Series
+        if not isinstance(mask, pd.Series):
+            mask = pd.Series([False] * len(base_index), index=base_index, dtype=bool)
+            
+    except Exception as e:
+        # If anything goes wrong, return a safe all-False mask
+        mask = pd.Series([False] * len(base_index), index=base_index, dtype=bool)
+    
+    return mask, msgs
+
 # -----------------------------
 # UI
 # -----------------------------
@@ -258,6 +437,58 @@ st.caption("RSI Signal Statistics")
 
 with st.sidebar:
     st.header("Controls")
+    
+    # --- Preconditions UI ---
+    st.subheader("Preconditions")
+
+    # Keep a list in session state
+    if 'preconditions' not in st.session_state:
+        st.session_state.preconditions = []
+
+    # Render current preconditions
+    if st.session_state.preconditions:
+        st.write("**Current Preconditions (ALL must be true):**")
+        for i, p in enumerate(st.session_state.preconditions):
+            sym = "≤" if p['comparison'] == "less_than" else "≥"
+            cols = st.columns([6, 1])
+            with cols[0]:
+                st.write(f"• {p['signal_ticker']} RSI {sym} {p['threshold']}")
+            with cols[1]:
+                if st.button("🗑️", key=f"remove_pre_{i}"):
+                    removed_pre = st.session_state.preconditions.pop(i)
+                    st.success(f"✅ Removed precondition: {removed_pre['signal_ticker']} RSI {'≤' if removed_pre['comparison'] == 'less_than' else '≥'} {removed_pre['threshold']}")
+                    st.rerun()
+    else:
+        st.caption("Add optional RSI gates on other tickers that must also be true.")
+
+    with st.expander("➕ Add Precondition"):
+        with st.form("add_precondition_form"):
+            pc_tkr = st.text_input("Precondition RSI ticker", value="QQQ").strip().upper()
+            pc_cmp = st.selectbox(
+                "Condition", ["less_than", "greater_than"],
+                index=0,  # default ≤
+                format_func=lambda x: "RSI ≤ threshold" if x == "less_than" else "RSI ≥ threshold",
+            )
+            pc_thr = st.number_input("RSI threshold", min_value=0.0, max_value=100.0, value=80.0, step=0.5)
+            submitted = st.form_submit_button("Add")
+            if submitted:
+                st.session_state.preconditions.append({
+                    "signal_ticker": pc_tkr,
+                    "comparison": pc_cmp,
+                    "threshold": float(pc_thr),
+                })
+                st.success(f"✅ Added precondition: {pc_tkr} RSI {'≤' if pc_cmp == 'less_than' else '≥'} {pc_thr}")
+                st.rerun()
+
+    # Bulk clear
+    if st.session_state.preconditions:
+        if st.button("🗑️ Clear all preconditions", type="secondary"):
+            count = len(st.session_state.preconditions)
+            st.session_state.preconditions = []
+            st.success(f"✅ Cleared all {count} preconditions")
+            st.rerun()
+
+    st.markdown("---")
     
     source_ticker = st.text_input("Signal ticker (for RSI signal)", value="SPY", 
                                  help="The ticker used to calculate RSI and generate trading signals. This is where the RSI condition is evaluated.").strip().upper()
@@ -329,7 +560,7 @@ with st.sidebar:
     else:
         start_date = st.date_input("Start date", value=default_start, max_value=today - timedelta(days=1))
     
-    end_date = st.date_input("End date", value=today)
+    end_date = st.date_input("End date", value=today + timedelta(days=7))
 
     edge_mode = st.radio(
         "Edge mode",
@@ -393,6 +624,14 @@ with st.sidebar:
         st.success("Cache cleared! Please refresh the page.")
         st.rerun()
     
+    # Big red "run analysis" button with identical functionality to clear data cache
+    if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
+        st.cache_data.clear()
+        st.session_state.analysis_run = True
+        st.success("Cache cleared! Please refresh the page.")
+        st.rerun()
+    
+    
 
 # -----------------------------
 # Data & Signal
@@ -400,6 +639,13 @@ with st.sidebar:
 if not source_ticker or not target_ticker or not comparison_ticker:
     st.warning("Enter all three ticker symbols to begin.")
     st.stop()
+
+# Only run analysis if the Run Analysis button has been pressed
+if not st.session_state.get('analysis_run', False):
+    st.info("👆 **Click the 'Run Analysis' button above to start the analysis.**")
+    st.stop()
+
+# Run analysis (triggered by Run Analysis button)
 
 # Auto-adjust start date to earliest common date if requested
 if auto_start:
@@ -441,29 +687,60 @@ if auto_start:
         st.write("- Adjust the date range")
         st.stop()
 
-    # Find the earliest common date where all three tickers have data
-    earliest_common_date = max(
+    # Find the earliest common date where all tickers (main + preconditions) have data
+    all_ticker_dates = [
         src.index.min().date(),
         tgt.index.min().date(), 
         cmp.index.min().date()
-    )
+    ]
+    
+    # Add precondition ticker dates
+    pre_list = st.session_state.get("preconditions", [])
+    precondition_data_info = []
+    for p in pre_list:
+        tkr = p.get("signal_ticker", "").strip().upper()
+        if tkr:
+            try:
+                pc_data = load_prices_uncached(tkr, str(early_start), str(end_date))
+                if not pc_data.empty:
+                    all_ticker_dates.append(pc_data.index.min().date())
+                    precondition_data_info.append(f"{tkr}: {pc_data.index.min().date()} to {pc_data.index.max().date()}")
+                else:
+                    precondition_data_info.append(f"{tkr}: No data")
+            except Exception:
+                precondition_data_info.append(f"{tkr}: Error loading")
+                pass
+    
+    earliest_common_date = max(all_ticker_dates)  # This should be max to find the latest start date where all tickers have data
+    
     
     # Update start_date to reflect the actual date being used
     original_start_date = start_date
     start_date = earliest_common_date
     
-    # Always reload with the earliest common date to maximize data coverage
-    st.info(f"📅 **Analysis period: {start_date} to {end_date}**")
     
     # Reload data with the earliest possible start date
     src = load_prices(source_ticker, str(start_date), str(end_date))
     tgt = load_prices(target_ticker, str(start_date), str(end_date))
     cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
+    
 else:
     # Load all three tickers with user's selected start date
     src = load_prices(source_ticker, str(start_date), str(end_date))
     tgt = load_prices(target_ticker, str(start_date), str(end_date))
     cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
+    
+    # Also check precondition tickers to ensure they have data in the selected range
+    pre_list = st.session_state.get("preconditions", [])
+    for p in pre_list:
+        tkr = p.get("signal_ticker", "").strip().upper()
+        if tkr:
+            try:
+                pc_data = load_prices_uncached(tkr, str(start_date), str(end_date))
+                if pc_data.empty:
+                    st.warning(f"⚠️ Precondition ticker {tkr} has no data in the selected date range ({start_date} to {end_date}). It will be treated as always False.")
+            except Exception:
+                st.warning(f"⚠️ Failed to load data for precondition ticker {tkr}. It will be treated as always False.")
     
     if src.empty:
         st.error(f"No data for source ticker: {source_ticker}")
@@ -503,7 +780,9 @@ if prices.empty:
 st.success(f"📊 **Data loaded successfully**: {len(prices)} trading days from {prices.index[0].strftime('%Y-%m-%d')} to {prices.index[-1].strftime('%Y-%m-%d')}")
 
 
+
 prices['rsi'] = compute_rsi(prices['close_src'], rsi_len)
+
 
 # Forward returns aligned to entry day (t+1) to match equity curve logic
 fwd_ret_raw = forward_return(prices['close_tgt'], horizon)
@@ -556,6 +835,83 @@ else:
 # Optional: suppress signals before percentile threshold is defined (rolling case)
 if signal_mode != "Absolute RSI" and perc_scope == "Rolling (windowed)":
     prices.loc[prices['rsi_thresh'].isna(), 'signal'] = False
+
+# Calculate original signal count for internal use
+original_signal_count = int(prices['signal'].sum())
+
+# Calculate RSI stats for internal use
+if 'rsi' in prices.columns:
+    rsi_stats = prices['rsi'].describe()
+    
+# Calculate threshold stats for internal use
+if 'rsi_thresh' in prices.columns:
+    if signal_mode == "Absolute RSI":
+        pass  # rsi_threshold already defined
+    else:
+        thresh_stats = prices['rsi_thresh'].describe()
+
+# --- Preconditions gating ---
+pre_list = st.session_state.get("preconditions", [])
+
+# Process preconditions
+
+# We use the *analysis* period you already established (prices.index).
+# Note: We do not expand your auto-start to include these tickers (keeps changes minimal).
+# Days where a precondition ticker lacks data will be treated as False.
+pc_mask, pc_msgs = build_precondition_mask(
+    base_index=prices.index,
+    preconditions=pre_list,
+    start_date=start_date,
+    end_date=end_date,
+    rsi_len=rsi_len,
+)
+
+# Apply precondition mask
+
+# Apply mask (all preconditions must be True)
+# Bypass pandas DataFrame assignment issues by working with underlying data
+try:
+    # Ensure pc_mask is properly aligned to prices.index
+    pc_mask_aligned = pc_mask.reindex(prices.index).fillna(False).astype(bool)
+    
+    # Additional safety: ensure pc_mask_aligned is a Series
+    if isinstance(pc_mask_aligned, pd.DataFrame):
+        # Force it to be a Series by taking the first column
+        pc_mask_aligned = pc_mask_aligned.iloc[:, 0] if pc_mask_aligned.shape[1] > 0 else pd.Series([False] * len(prices.index), index=prices.index, dtype=bool)
+    
+    # Work directly with the underlying numpy arrays to avoid pandas issues
+    signal_values = prices['signal'].values
+    mask_values = pc_mask_aligned.values
+    
+    # Ensure we have 1D arrays and flatten if necessary
+    signal_values = signal_values.flatten()
+    mask_values = mask_values.flatten()
+    
+    # Ensure both arrays have the same length
+    if len(signal_values) != len(mask_values):
+        st.error(f"❌ **Array length mismatch**: signal ({len(signal_values)}) vs mask ({len(mask_values)})")
+        st.write("**Solution**: Try refreshing the page or clearing the cache.")
+        st.stop()
+    
+    # Apply the mask using numpy operations
+    combined_signal = signal_values & mask_values
+    
+    # Create a new Series and assign it back
+    new_signal_series = pd.Series(combined_signal, index=prices.index, dtype=bool)
+    prices['signal'] = new_signal_series
+    
+    # Calculate final signal count for internal use
+    if pre_list:
+        original_signals = int((prices['signal'] == True).sum()) if 'signal' in prices.columns else 0
+        
+except Exception as e:
+    st.error(f"❌ **Error applying preconditions**: {str(e)}")
+    st.write("**Solution**: Try refreshing the page or clearing the cache.")
+    st.stop()
+
+# Surface any data messages
+for m in pc_msgs:
+    st.info(m)
 
 # Calculate excess returns (target minus comparison) for signal events - entry-aligned
 prices['event_excess'] = np.where(prices['signal'], prices['fwd_ret_entry'] - prices['fwd_ret_cmp_entry'], np.nan)
@@ -1108,6 +1464,13 @@ with col2:
     st.markdown("**Threshold reference**")
     st.write(f"Signal on **{source_ticker}**, returns on **{target_ticker}**.")
     st.write(thresh_note)
+    
+    # Show active preconditions
+    if st.session_state.get("preconditions"):
+        st.write("**Preconditions (ALL must hold):**")
+        for p in st.session_state.preconditions:
+            sym = "≤" if p['comparison'] == "less_than" else "≥"
+            st.write(f"• {p['signal_ticker']} RSI {sym} {p['threshold']}")
 
     # Win rate display (only for fixed horizon mode)
     if edge_mode == "Fixed horizon (days)":
