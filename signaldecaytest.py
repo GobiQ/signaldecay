@@ -627,11 +627,6 @@ with st.sidebar:
         st.success("Cache cleared! Please refresh the page.")
         st.rerun()
     
-    # Add option to force recent data refresh
-    if st.button("📅 Force Recent Data Refresh"):
-        st.cache_data.clear()
-        st.info("🔄 **Forcing data refresh to get the most recent data...**")
-        st.rerun()
     
 
 # -----------------------------
@@ -642,7 +637,6 @@ if not source_ticker or not target_ticker or not comparison_ticker:
     st.stop()
 
 # Run analysis automatically (cache clearing is handled by the Run Analysis button)
-st.info(f"🔄 **Debug**: Running analysis with fresh data")
 
 # Auto-adjust start date to earliest common date if requested
 if auto_start:
@@ -833,29 +827,24 @@ else:
 if signal_mode != "Absolute RSI" and perc_scope == "Rolling (windowed)":
     prices.loc[prices['rsi_thresh'].isna(), 'signal'] = False
 
-# Debug: Show original signals before preconditions
+# Calculate original signal count for internal use
 original_signal_count = int(prices['signal'].sum())
-st.info(f"🔍 **Debug**: Original signals before preconditions: {original_signal_count}")
 
-# Debug: Show RSI stats
+# Calculate RSI stats for internal use
 if 'rsi' in prices.columns:
     rsi_stats = prices['rsi'].describe()
-    st.info(f"🔍 **Debug**: RSI stats - Min: {rsi_stats['min']:.1f}, Max: {rsi_stats['max']:.1f}, Mean: {rsi_stats['mean']:.1f}")
     
-# Debug: Show threshold info
+# Calculate threshold stats for internal use
 if 'rsi_thresh' in prices.columns:
     if signal_mode == "Absolute RSI":
-        st.info(f"🔍 **Debug**: Using absolute RSI threshold: {rsi_threshold}")
+        pass  # rsi_threshold already defined
     else:
         thresh_stats = prices['rsi_thresh'].describe()
-        st.info(f"🔍 **Debug**: RSI threshold stats - Min: {thresh_stats['min']:.1f}, Max: {thresh_stats['max']:.1f}, Mean: {thresh_stats['mean']:.1f}")
 
 # --- Preconditions gating ---
 pre_list = st.session_state.get("preconditions", [])
 
-# Debug: Show precondition info
-if pre_list:
-    st.info(f"🔍 **Debug**: Processing {len(pre_list)} preconditions: {[p['signal_ticker'] for p in pre_list]}")
+# Process preconditions
 
 # We use the *analysis* period you already established (prices.index).
 # Note: We do not expand your auto-start to include these tickers (keeps changes minimal).
@@ -868,9 +857,7 @@ pc_mask, pc_msgs = build_precondition_mask(
     rsi_len=rsi_len,
 )
 
-# Debug: Show mask info
-if pre_list:
-    st.info(f"🔍 **Debug**: Precondition mask created. True values: {pc_mask.sum()}/{len(pc_mask)} ({pc_mask.sum()/len(pc_mask)*100:.1f}%)")
+# Apply precondition mask
 
 # Apply mask (all preconditions must be True)
 # Bypass pandas DataFrame assignment issues by working with underlying data
@@ -904,10 +891,9 @@ try:
     new_signal_series = pd.Series(combined_signal, index=prices.index, dtype=bool)
     prices['signal'] = new_signal_series
     
-    # Debug: Show signal info
+    # Calculate final signal count for internal use
     if pre_list:
         original_signals = int((prices['signal'] == True).sum()) if 'signal' in prices.columns else 0
-        st.info(f"🔍 **Debug**: After applying preconditions - Signals: {original_signals}")
         
 except Exception as e:
     st.error(f"❌ **Error applying preconditions**: {str(e)}")
