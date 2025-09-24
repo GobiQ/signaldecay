@@ -310,6 +310,9 @@ def build_precondition_mask(
     if len(base_index) == 0:
         return pd.Series([], index=base_index, dtype=bool), msgs
 
+    # Debug: Show base_index information
+    msgs.append(f"Base index: {len(base_index)} days from {base_index.min().date()} to {base_index.max().date()}")
+
     mask = pd.Series(True, index=base_index, dtype=bool)
     
 
@@ -348,10 +351,20 @@ def build_precondition_mask(
         # align to main app trading calendar; missing → False
         cond_aligned = cond.reindex(base_index).fillna(False).astype(bool)
         
-        # Debug: Show data availability
+        # Debug: Show data availability and alignment
         data_available = cond.reindex(base_index).notna().sum()
         total_days = len(base_index)
         msgs.append(f"  {tkr} data available: {data_available}/{total_days} days ({data_available/total_days:.1%})")
+        
+        # Show the original condition data range vs base_index range
+        if not cond.empty:
+            msgs.append(f"  {tkr} original condition range: {cond.index.min().date()} to {cond.index.max().date()}")
+            msgs.append(f"  {tkr} base_index range: {base_index.min().date()} to {base_index.max().date()}")
+            
+            # Check if there's a mismatch in date ranges
+            if cond.index.max().date() < base_index.max().date():
+                days_behind = (base_index.max().date() - cond.index.max().date()).days
+                msgs.append(f"  ⚠️ {tkr} condition data is {days_behind} days behind base_index!")
         
         # Ensure both are Series before combining
         if isinstance(mask, pd.DataFrame):
@@ -366,6 +379,13 @@ def build_precondition_mask(
         true_count = mask.sum()
         total_count = len(mask)
         msgs.append(f"After {tkr}: {true_count}/{total_count} days still pass ({true_count/total_count:.1%})")
+        
+        # Additional debug: Show the date range of the mask
+        if true_count > 0:
+            mask_dates = mask.index[mask]
+            msgs.append(f"  {tkr} mask date range: {mask_dates.min().date()} to {mask_dates.max().date()}")
+        else:
+            msgs.append(f"  {tkr} mask: No valid dates")
 
     # Final safety check: ensure mask has the correct index and dtype
     try:
@@ -392,6 +412,17 @@ def build_precondition_mask(
     except Exception as e:
         # If anything goes wrong, return a safe all-False mask
         mask = pd.Series([False] * len(base_index), index=base_index, dtype=bool)
+    
+    # Final debug: Show the final mask statistics
+    final_true_count = mask.sum()
+    final_total_count = len(mask)
+    msgs.append(f"FINAL MASK: {final_true_count}/{final_total_count} days pass all preconditions ({final_true_count/final_total_count:.1%})")
+    
+    if final_true_count > 0:
+        final_mask_dates = mask.index[mask]
+        msgs.append(f"FINAL MASK date range: {final_mask_dates.min().date()} to {final_mask_dates.max().date()}")
+    else:
+        msgs.append(f"FINAL MASK: No valid dates - this will cause data to end early!")
     
     return mask, msgs
 
