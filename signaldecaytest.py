@@ -487,12 +487,6 @@ with st.sidebar:
 
     st.markdown("---")
     
-    # Big red "run analysis" button with identical functionality to clear data cache
-    if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
-        st.cache_data.clear()
-        st.success("Cache cleared! Please refresh the page.")
-        st.rerun()
-    
     source_ticker = st.text_input("Signal ticker (for RSI signal)", value="SPY", 
                                  help="The ticker used to calculate RSI and generate trading signals. This is where the RSI condition is evaluated.").strip().upper()
     target_ticker = st.text_input("Target ticker (to allocate / measure returns)", value="UVXY", 
@@ -623,6 +617,12 @@ with st.sidebar:
     
     # Add cache clearing option for debugging
     if st.button("🔄 Clear Data Cache (if having ticker issues)"):
+        st.cache_data.clear()
+        st.success("Cache cleared! Please refresh the page.")
+        st.rerun()
+    
+    # Big red "run analysis" button with identical functionality to clear data cache
+    if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
         st.cache_data.clear()
         st.success("Cache cleared! Please refresh the page.")
         st.rerun()
