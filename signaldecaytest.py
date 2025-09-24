@@ -456,7 +456,6 @@ with st.sidebar:
             with cols[1]:
                 if st.button("🗑️", key=f"remove_pre_{i}"):
                     st.session_state.preconditions.pop(i)
-                    st.rerun()
     else:
         st.caption("Add optional RSI gates on other tickers that must also be true.")
 
@@ -475,15 +474,12 @@ with st.sidebar:
                 "comparison": pc_cmp,
                 "threshold": float(pc_thr),
             })
-            # Add debug info
-            st.info(f"🔍 **Debug**: Added precondition for {pc_tkr}. Total preconditions: {len(st.session_state.preconditions)}")
-            st.rerun()
+            # Precondition added successfully
 
     # Bulk clear
     if st.session_state.preconditions:
         if st.button("🗑️ Clear all preconditions", type="secondary"):
             st.session_state.preconditions = []
-            st.rerun()
 
     st.markdown("---")
     
