@@ -322,7 +322,10 @@ def build_precondition_mask(
         msgs.append(f"Processing precondition {i+1}: {tkr} RSI {'≤' if cmp == 'less_than' else '≥'} {thr}")
 
         try:
-            s = load_prices(tkr, str(start_date), str(end_date))
+            # Try to get data with a more aggressive end date to ensure we get recent data
+            from datetime import datetime, timedelta
+            extended_end = (datetime.strptime(str(end_date), '%Y-%m-%d') + timedelta(days=7)).strftime('%Y-%m-%d')
+            s = load_prices(tkr, str(start_date), extended_end)
         except Exception:
             s = pd.DataFrame()
 
@@ -344,6 +347,11 @@ def build_precondition_mask(
 
         # align to main app trading calendar; missing → False
         cond_aligned = cond.reindex(base_index).fillna(False).astype(bool)
+        
+        # Debug: Show data availability
+        data_available = cond.reindex(base_index).notna().sum()
+        total_days = len(base_index)
+        msgs.append(f"  {tkr} data available: {data_available}/{total_days} days ({data_available/total_days:.1%})")
         
         # Ensure both are Series before combining
         if isinstance(mask, pd.DataFrame):
@@ -642,6 +650,7 @@ if auto_start:
     
     # Add precondition ticker dates
     pre_list = st.session_state.get("preconditions", [])
+    precondition_data_info = []
     for p in pre_list:
         tkr = p.get("signal_ticker", "").strip().upper()
         if tkr:
@@ -649,11 +658,26 @@ if auto_start:
                 pc_data = load_prices(tkr, str(early_start), str(end_date))
                 if not pc_data.empty:
                     all_ticker_dates.append(pc_data.index.min().date())
+                    precondition_data_info.append(f"{tkr}: {pc_data.index.min().date()} to {pc_data.index.max().date()}")
+                else:
+                    precondition_data_info.append(f"{tkr}: No data")
             except Exception:
-                # If precondition ticker fails to load, we'll handle it later
+                precondition_data_info.append(f"{tkr}: Error loading")
                 pass
     
-    earliest_common_date = max(all_ticker_dates)
+    earliest_common_date = max(all_ticker_dates)  # This should be max to find the latest start date where all tickers have data
+    
+    # Debug: Show what's happening with date adjustment
+    if pre_list:
+        st.info(f"🔍 **Auto-start date adjustment with {len(pre_list)} preconditions:**")
+        st.write(f"**Main tickers start dates:**")
+        st.write(f"- {source_ticker}: {src.index.min().date()}")
+        st.write(f"- {target_ticker}: {tgt.index.min().date()}")
+        st.write(f"- {comparison_ticker}: {cmp.index.min().date()}")
+        st.write(f"**Precondition tickers:**")
+        for info in precondition_data_info:
+            st.write(f"- {info}")
+        st.write(f"**Adjusted start date:** {earliest_common_date} (latest start date where all tickers have data)")
     
     # Update start_date to reflect the actual date being used
     original_start_date = start_date
@@ -664,6 +688,17 @@ if auto_start:
     src = load_prices(source_ticker, str(start_date), str(end_date))
     tgt = load_prices(target_ticker, str(start_date), str(end_date))
     cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
+    
+    # Verify that we still have recent data after date adjustment
+    if pre_list:
+        latest_data_date = min(src.index.max().date(), tgt.index.max().date(), cmp.index.max().date())
+        days_behind = (today - latest_data_date).days
+        if days_behind > 2:  # More than 2 days behind
+            st.warning(f"⚠️ **Data freshness issue**: After date adjustment, latest data is {days_behind} days behind today ({latest_data_date}). This may limit recent signal detection.")
+            st.write("**Possible solutions:**")
+            st.write("- Try disabling 'Auto-adjust start date' and use a manual start date")
+            st.write("- Check if any precondition tickers have limited recent data")
+            st.write("- Use the 'Force Recent Data Refresh' button")
 else:
     # Load all three tickers with user's selected start date
     src = load_prices(source_ticker, str(start_date), str(end_date))
