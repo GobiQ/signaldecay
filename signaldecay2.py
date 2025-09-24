@@ -1,6 +1,6 @@
 # rsi_signal_stability_app.py
 # Streamlit app to analyze stability/decay of RSI-based signals using absolute or percentile thresholds
-# Author: ChatGPT
+# Author: Gobi and his AI pals
 # Run: streamlit run rsi_signal_stability_app.py
 
 import streamlit as st
