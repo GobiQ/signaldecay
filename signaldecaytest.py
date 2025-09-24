@@ -468,7 +468,7 @@ def build_precondition_mask(
 # -----------------------------
 # UI
 # -----------------------------
-st.set_page_config(page_title="Signal Decay", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Signal Decay", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
 
 st.title("Signal Decay")
 st.caption("RSI Signal Statistics")
