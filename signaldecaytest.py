@@ -641,10 +641,11 @@ if not source_ticker or not target_ticker or not comparison_ticker:
     st.warning("Enter all three ticker symbols to begin.")
     st.stop()
 
-# Check if we have preconditions - if so, use uncached data for consistency
+# Check if we have preconditions - if so, clear cache for consistency
 has_preconditions = len(st.session_state.get("preconditions", [])) > 0
 if has_preconditions:
-    st.info(f"🔄 **Debug**: Preconditions detected - using uncached data for consistency")
+    st.cache_data.clear()  # Clear cache when preconditions are present
+    st.info(f"🔄 **Debug**: Preconditions detected - cache cleared for consistency")
 else:
     st.info(f"🔄 **Debug**: No preconditions - using cached data")
 
@@ -655,14 +656,9 @@ if auto_start:
     early_start = date(1990, 1, 1)
     
     # Load all three tickers from the early start date
-    if has_preconditions:
-        src = load_prices_uncached(source_ticker, str(early_start), str(end_date))
-        tgt = load_prices_uncached(target_ticker, str(early_start), str(end_date))
-        cmp = load_prices_uncached(comparison_ticker, str(early_start), str(end_date))
-    else:
-        src = load_prices(source_ticker, str(early_start), str(end_date))
-        tgt = load_prices(target_ticker, str(early_start), str(end_date))
-        cmp = load_prices(comparison_ticker, str(early_start), str(end_date))
+    src = load_prices(source_ticker, str(early_start), str(end_date))
+    tgt = load_prices(target_ticker, str(early_start), str(end_date))
+    cmp = load_prices(comparison_ticker, str(early_start), str(end_date))
     
     if src.empty:
         st.error(f"❌ **No data found for source ticker: {source_ticker}**")
@@ -726,25 +722,15 @@ if auto_start:
     
     
     # Reload data with the earliest possible start date
-    if has_preconditions:
-        src = load_prices_uncached(source_ticker, str(start_date), str(end_date))
-        tgt = load_prices_uncached(target_ticker, str(start_date), str(end_date))
-        cmp = load_prices_uncached(comparison_ticker, str(start_date), str(end_date))
-    else:
-        src = load_prices(source_ticker, str(start_date), str(end_date))
-        tgt = load_prices(target_ticker, str(start_date), str(end_date))
-        cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
+    src = load_prices(source_ticker, str(start_date), str(end_date))
+    tgt = load_prices(target_ticker, str(start_date), str(end_date))
+    cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
     
 else:
     # Load all three tickers with user's selected start date
-    if has_preconditions:
-        src = load_prices_uncached(source_ticker, str(start_date), str(end_date))
-        tgt = load_prices_uncached(target_ticker, str(start_date), str(end_date))
-        cmp = load_prices_uncached(comparison_ticker, str(start_date), str(end_date))
-    else:
-        src = load_prices(source_ticker, str(start_date), str(end_date))
-        tgt = load_prices(target_ticker, str(start_date), str(end_date))
-        cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
+    src = load_prices(source_ticker, str(start_date), str(end_date))
+    tgt = load_prices(target_ticker, str(start_date), str(end_date))
+    cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
     
     # Also check precondition tickers to ensure they have data in the selected range
     pre_list = st.session_state.get("preconditions", [])
