@@ -27,6 +27,14 @@ def compute_rsi(close: pd.Series, length: int = 14) -> pd.Series:
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
+def sma(close: pd.Series, length: int) -> pd.Series:
+    """Simple Moving Average"""
+    return close.rolling(int(length), min_periods=max(3, int(length*0.6))).mean()
+
+def ema(close: pd.Series, length: int) -> pd.Series:
+    """Exponential Moving Average - Standard EMA; for 'Wilder-style' use alpha=1/length; here we use span=length"""
+    return close.ewm(span=int(length), adjust=False, min_periods=max(3, int(length*0.6))).mean()
+
 def load_prices_uncached(ticker: str, start: str, end: str) -> pd.DataFrame:
     """Non-cached version of load_prices for preconditions to avoid cache issues."""
     try:
@@ -404,6 +412,60 @@ def build_precondition_mask(
 
             mask = mask & cond_aligned
 
+        elif mode in ("price_vs_ma","price_vs_ema","ma_vs_ma","ema_vs_ema"):
+            lhs_tkr = p.get("lhs_ticker","").strip().upper()
+            rhs_tkr = p.get("rhs_ticker","").strip().upper()
+            lhs_len = int(p.get("lhs_len", 1))
+            rhs_len = int(p.get("rhs_len", 50))
+            op      = p.get("op","greater_than")
+
+            try:
+                from datetime import datetime, timedelta
+                extended_end = (datetime.strptime(str(end_date), '%Y-%m-%d') + timedelta(days=7)).strftime('%Y-%m-%d')
+                lhs_df = load_prices_uncached(lhs_tkr, str(start_date), extended_end)
+                rhs_df = load_prices_uncached(rhs_tkr, str(start_date), extended_end)
+            except Exception as e:
+                lhs_df, rhs_df = pd.DataFrame(), pd.DataFrame()
+                print(f"Error loading {lhs_tkr}/{rhs_tkr}: {e}")
+
+            if lhs_df.empty or rhs_df.empty or "close" not in lhs_df.columns or "close" not in rhs_df.columns:
+                this = pd.Series(False, index=base_index, dtype=bool)
+                mask = mask & this
+                print(f"Warning: MA/EMA {lhs_tkr}/{rhs_tkr} missing data; treated as False")
+                continue
+
+            lhs_close = lhs_df["close"].copy()
+            rhs_close = rhs_df["close"].copy()
+            lhs_close.index = pd.to_datetime(lhs_close.index).tz_localize(None)
+            rhs_close.index = pd.to_datetime(rhs_close.index).tz_localize(None)
+
+            # Build LHS series
+            if mode in ("price_vs_ma","price_vs_ema"):
+                lhs_series = lhs_close  # price
+                # Optional: if lhs_len > 1, allow "price over window" average (rare). Keep simple:
+                # lhs_series = lhs_close if lhs_len <= 1 else sma(lhs_close, lhs_len)
+            else:
+                # ma_vs_ma or ema_vs_ema for LHS
+                lhs_series = sma(lhs_close, lhs_len) if mode == "ma_vs_ma" else ema(lhs_close, lhs_len)
+
+            # Build RHS series
+            if mode == "price_vs_ma":
+                rhs_series = sma(rhs_close, rhs_len)
+            elif mode == "price_vs_ema":
+                rhs_series = ema(rhs_close, rhs_len)
+            elif mode == "ma_vs_ma":
+                rhs_series = sma(rhs_close, rhs_len)
+            else:  # "ema_vs_ema"
+                rhs_series = ema(rhs_close, rhs_len)
+
+            # Align and compare
+            cond = _cmp_series(lhs_series, rhs_series, op)
+            cond_aligned = cond.reindex(base_index).fillna(False).astype(bool)
+
+            print(f"Debug {mode} {lhs_tkr}({lhs_len}) vs {rhs_tkr}({rhs_len}) op={op}; matches {cond_aligned.sum()}/{len(cond_aligned)}")
+
+            mask = mask & cond_aligned
+
         else:
             # static mode (existing behavior, now supports inclusive ops + per-precondition RSI length)
             tkr = p.get("signal_ticker", "").strip().upper()
@@ -490,7 +552,10 @@ with st.sidebar:
             cols = st.columns([6, 1])
             with cols[0]:
                 mode = p.get("mode", "static")
-                if mode == "pair":
+                if mode in ("price_vs_ma","price_vs_ema","ma_vs_ma","ema_vs_ema"):
+                    sym = {"less_than":"<","greater_than":">","less_equal":"≤","greater_equal":"≥","equal":"="}[p.get("op","less_than")]
+                    st.write(f"• {mode}: {p['lhs_ticker']}({p.get('lhs_len', 1)}) {sym} {p['rhs_ticker']}({p.get('rhs_len', 1)})")
+                elif mode == "pair":
                     sym = {"less_than":"<", "greater_than":">", "less_equal":"≤", "greater_equal":"≥", "equal":"="}[p.get("op","less_than")]
                     st.write(f"• {p['lhs_ticker']} RSI({p.get('lhs_len', 10)}) {sym} {p['rhs_ticker']} RSI({p.get('rhs_len', 10)})")
                 else:
@@ -507,7 +572,7 @@ with st.sidebar:
         st.caption("Add optional RSI gates on other tickers that must also be true.")
 
     with st.expander("➕ Add Precondition"):
-        tabs = st.tabs(["Static RSI", "Pair RSI"])
+        tabs = st.tabs(["Static RSI", "Pair RSI", "Price / MA / EMA"])
 
         # --- STATIC (existing behavior) ---
         with tabs[0]:
@@ -564,6 +629,52 @@ with st.sidebar:
                         "rhs_ticker": rhs_t, "rhs_len": int(rhs_len),
                     })
                     st.success(f"✅ Added precondition: {lhs_t} ({lhs_len}d RSI) {op} {rhs_t} ({rhs_len}d RSI)")
+                    st.rerun()
+
+        # --- TAB 2: Price / MA / EMA (NEW) ---
+        with tabs[2]:
+            with st.form("add_precondition_form_ma_ema"):
+                mode_choice = st.selectbox(
+                    "Condition type",
+                    ["price_vs_ma", "price_vs_ema", "ma_vs_ma", "ema_vs_ema"],
+                    index=0,
+                    format_func=lambda m: {
+                        "price_vs_ma": "Price vs Simple Moving Average (SMA)",
+                        "price_vs_ema": "Price vs Exponential Moving Average (EMA)",
+                        "ma_vs_ma": "SMA vs SMA",
+                        "ema_vs_ema": "EMA vs EMA",
+                    }[m]
+                )
+
+                cols = st.columns(2)
+                with cols[0]:
+                    lhs_t = st.text_input("Left side ticker (LHS)", value="SPY").strip().upper()
+                    lhs_len = st.number_input("LHS window (days)", min_value=1, max_value=500, value=1, step=1,
+                                              help="Use 1 for raw price when using Price vs MA/EMA.")
+                with cols[1]:
+                    rhs_t = st.text_input("Right side ticker (RHS)", value="SPY").strip().upper()
+                    default_rhs_len = 200 if "price_vs_" in mode_choice else 50
+                    rhs_len = st.number_input("RHS window (days)", min_value=1, max_value=500, value=default_rhs_len, step=1)
+
+                op = st.selectbox(
+                    "Comparison",
+                    ["less_than", "greater_than", "less_equal", "greater_equal", "equal"],
+                    index=1,
+                    format_func=lambda x: {
+                        "less_than":"<", "greater_than":">",
+                        "less_equal":"≤", "greater_equal":"≥", "equal":"="
+                    }[x]
+                )
+
+                submitted_ma = st.form_submit_button("Add")
+                if submitted_ma:
+                    st.session_state.preconditions.append({
+                        "mode": mode_choice,
+                        "lhs_ticker": lhs_t, "lhs_len": int(lhs_len),
+                        "op": op,
+                        "rhs_ticker": rhs_t, "rhs_len": int(rhs_len),
+                    })
+                    st.success(f"✅ Added precondition: {mode_choice} | {lhs_t}({lhs_len}) {op} {rhs_t}({rhs_len})")
                     st.rerun()
 
     # Bulk clear
@@ -838,7 +949,8 @@ if auto_start:
     for p in pre_list:
         mode = p.get("mode","static")
         try:
-            if mode == "pair":
+            if mode in ("pair","price_vs_ma","price_vs_ema","ma_vs_ma","ema_vs_ema"):
+                # collect both sides
                 for tkr in [p.get("lhs_ticker","").strip().upper(),
                             p.get("rhs_ticker","").strip().upper()]:
                     if tkr:
@@ -1613,7 +1725,10 @@ with col2:
         st.write("**Preconditions (ALL must hold):**")
         for p in st.session_state.preconditions:
             mode = p.get("mode","static")
-            if mode == "pair":
+            if mode in ("price_vs_ma","price_vs_ema","ma_vs_ma","ema_vs_ema"):
+                sym = {"less_than":"<","greater_than":">","less_equal":"≤","greater_equal":"≥","equal":"="}[p.get("op","less_than")]
+                st.write(f"• {mode}: {p['lhs_ticker']}({p.get('lhs_len', 1)}) {sym} {p['rhs_ticker']}({p.get('rhs_len', 1)})")
+            elif mode == "pair":
                 sym = {"less_than":"<","greater_than":">","less_equal":"≤","greater_equal":"≥","equal":"="}[p.get("op","less_than")]
                 st.write(f"• {p['lhs_ticker']} RSI({p.get('lhs_len', 10)}) {sym} {p['rhs_ticker']} RSI({p.get('rhs_len', 10)})")
             else:
