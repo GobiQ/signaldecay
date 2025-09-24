@@ -878,6 +878,13 @@ else:
     effective_target_ticker = target_ticker
     effective_comparison_ticker = comparison_ticker
 
+# Debug: Print the effective tickers to see what's being used
+print(f"DEBUG: use_precond_only={use_precond_only}")
+print(f"DEBUG: precond_hold_ticker={precond_hold_ticker}")
+print(f"DEBUG: precond_fallback_ticker={precond_fallback_ticker}")
+print(f"DEBUG: effective_target_ticker={effective_target_ticker}")
+print(f"DEBUG: effective_comparison_ticker={effective_comparison_ticker}")
+
 # Only run analysis if the Run Analysis button has been pressed
 if not st.session_state.get('analysis_run', False):
     st.info("👆 **Click the 'Run Analysis' button above to start the analysis.**")
@@ -1386,6 +1393,9 @@ with col1:
 
     if build_equity:
         st.subheader("Equity Curve: Target vs Comparison")
+        
+        # Debug: Show the user what tickers are being used
+        st.info(f"🔍 **Debug Info**: Using effective_comparison_ticker = '{effective_comparison_ticker}' for equity curve legend")
 
         # --- Equity Curve: Target vs Comparison (with taxes) ---
         
@@ -1407,6 +1417,10 @@ with col1:
         # Tax-adjust only the strategy
         eq_strat_tax = calculate_tax_adjusted_equity(strat_ret, tax_rate)
 
+        # Debug: Print what ticker is being used for the equity curve
+        print(f"DEBUG EQUITY: effective_comparison_ticker={effective_comparison_ticker}")
+        print(f"DEBUG EQUITY: Creating legend with 'Buy&Hold {effective_comparison_ticker}'")
+        
         eq_df = pd.DataFrame({
             'Strategy (pre-tax)': eq_strat,
             f'Strategy (Tax {tax_rate:.0f}%)': eq_strat_tax,
