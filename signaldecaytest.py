@@ -365,13 +365,15 @@ def build_precondition_mask(
             from datetime import datetime, timedelta
             extended_end = (datetime.strptime(str(end_date), '%Y-%m-%d') + timedelta(days=7)).strftime('%Y-%m-%d')
             s = load_prices_uncached(tkr, str(start_date), extended_end)
-        except Exception:
+        except Exception as e:
             s = pd.DataFrame()
+            print(f"Error loading {tkr}: {e}")
 
         if s.empty or "close" not in s.columns:
             # Create a False series with the same index as mask
             this = pd.Series(False, index=base_index, dtype=bool)
             mask = mask & this  # Use & instead of &= to avoid inplace issues
+            print(f"Warning: {tkr} has no data or missing 'close' column")
             continue
 
         s = s.copy()
@@ -385,6 +387,8 @@ def build_precondition_mask(
 
         # align to main app trading calendar; missing → False
         cond_aligned = cond.reindex(base_index).fillna(False).astype(bool)
+        
+        print(f"Debug {tkr}: RSI range {rsi.min():.1f}-{rsi.max():.1f}, condition {cmp} {thr}, matches: {cond_aligned.sum()}/{len(cond_aligned)}")
         
         # Ensure both are Series before combining
         if isinstance(mask, pd.DataFrame):
@@ -475,6 +479,8 @@ with st.sidebar:
             })
             # Clear cache when adding a precondition
             st.cache_data.clear()
+            # Add debug info
+            st.info(f"🔍 **Debug**: Added precondition for {pc_tkr}. Total preconditions: {len(st.session_state.preconditions)}")
             st.rerun()
 
     # Bulk clear
@@ -827,6 +833,10 @@ if signal_mode != "Absolute RSI" and perc_scope == "Rolling (windowed)":
 # --- Preconditions gating ---
 pre_list = st.session_state.get("preconditions", [])
 
+# Debug: Show precondition info
+if pre_list:
+    st.info(f"🔍 **Debug**: Processing {len(pre_list)} preconditions: {[p['signal_ticker'] for p in pre_list]}")
+
 # We use the *analysis* period you already established (prices.index).
 # Note: We do not expand your auto-start to include these tickers (keeps changes minimal).
 # Days where a precondition ticker lacks data will be treated as False.
@@ -837,6 +847,10 @@ pc_mask, pc_msgs = build_precondition_mask(
     end_date=end_date,
     rsi_len=rsi_len,
 )
+
+# Debug: Show mask info
+if pre_list:
+    st.info(f"🔍 **Debug**: Precondition mask created. True values: {pc_mask.sum()}/{len(pc_mask)} ({pc_mask.sum()/len(pc_mask)*100:.1f}%)")
 
 # Apply mask (all preconditions must be True)
 # Bypass pandas DataFrame assignment issues by working with underlying data
@@ -869,6 +883,11 @@ try:
     # Create a new Series and assign it back
     new_signal_series = pd.Series(combined_signal, index=prices.index, dtype=bool)
     prices['signal'] = new_signal_series
+    
+    # Debug: Show signal info
+    if pre_list:
+        original_signals = int((prices['signal'] == True).sum()) if 'signal' in prices.columns else 0
+        st.info(f"🔍 **Debug**: After applying preconditions - Signals: {original_signals}")
         
 except Exception as e:
     st.error(f"❌ **Error applying preconditions**: {str(e)}")
