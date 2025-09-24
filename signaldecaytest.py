@@ -307,11 +307,28 @@ def build_precondition_mask(
     # Final safety check: ensure mask has the correct index and dtype
     try:
         mask = mask.reindex(base_index).fillna(False).astype(bool)
+        
+        # CRITICAL: Ensure we return a Series, not a DataFrame
+        if isinstance(mask, pd.DataFrame):
+            # If somehow we got a DataFrame, take the first column or create a new Series
+            if mask.shape[1] == 1:
+                mask = mask.iloc[:, 0]
+            else:
+                # Multiple columns - this shouldn't happen, create a new Series
+                mask = pd.Series([False] * len(base_index), index=base_index, dtype=bool)
+                msgs.append("⚠️ Precondition mask was a DataFrame with multiple columns - using all-False mask")
+        
         # Ensure the mask has exactly the same length as base_index
         if len(mask) != len(base_index):
             # Force correct length by creating a new series
             mask = pd.Series([False] * len(base_index), index=base_index, dtype=bool)
             msgs.append("⚠️ Precondition mask length mismatch - using all-False mask")
+            
+        # Final verification that we have a Series
+        if not isinstance(mask, pd.Series):
+            mask = pd.Series([False] * len(base_index), index=base_index, dtype=bool)
+            msgs.append("⚠️ Precondition mask was not a Series - using all-False mask")
+            
     except Exception as e:
         # If anything goes wrong, return a safe all-False mask
         mask = pd.Series([False] * len(base_index), index=base_index, dtype=bool)
@@ -725,15 +742,14 @@ try:
     # Ensure pc_mask is properly aligned to prices.index
     pc_mask_aligned = pc_mask.reindex(prices.index).fillna(False).astype(bool)
     
-    # Debug: Check the shape of pc_mask_aligned
-    if hasattr(pc_mask_aligned, 'shape') and len(pc_mask_aligned.shape) > 1:
-        st.warning(f"⚠️ **Unexpected shape detected**: pc_mask_aligned has shape {pc_mask_aligned.shape}")
+    # Additional safety: ensure pc_mask_aligned is a Series
+    if isinstance(pc_mask_aligned, pd.DataFrame):
+        st.warning(f"⚠️ **DataFrame detected instead of Series**: pc_mask_aligned has shape {pc_mask_aligned.shape}")
         st.write("**Debug info:**")
         st.write(f"- pc_mask_aligned type: {type(pc_mask_aligned)}")
         st.write(f"- pc_mask_aligned shape: {pc_mask_aligned.shape}")
-        st.write(f"- pc_mask_aligned values shape: {pc_mask_aligned.values.shape}")
-        # Force it to be 1D
-        pc_mask_aligned = pc_mask_aligned.iloc[:, 0] if len(pc_mask_aligned.shape) > 1 else pc_mask_aligned
+        # Force it to be a Series by taking the first column
+        pc_mask_aligned = pc_mask_aligned.iloc[:, 0] if pc_mask_aligned.shape[1] > 0 else pd.Series([False] * len(prices.index), index=prices.index, dtype=bool)
     
     # Work directly with the underlying numpy arrays to avoid pandas issues
     signal_values = prices['signal'].values
