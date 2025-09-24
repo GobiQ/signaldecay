@@ -281,8 +281,9 @@ def build_precondition_mask(
 
         if s.empty or "close" not in s.columns:
             msgs.append(f"⚠️ No data for precondition ticker {tkr}; treating as always False.")
-            this = pd.Series(False, index=base_index)
-            mask &= this
+            # Create a False series with the same index as mask
+            this = pd.Series(False, index=base_index, dtype=bool)
+            mask = mask & this  # Use & instead of &= to avoid inplace issues
             continue
 
         s = s.copy()
@@ -296,7 +297,8 @@ def build_precondition_mask(
 
         # align to main app trading calendar; missing → False
         cond_aligned = cond.reindex(base_index).fillna(False).astype(bool)
-        mask &= cond_aligned
+        # Ensure both series have the same index before combining
+        mask = mask & cond_aligned  # Use & instead of &= to avoid inplace issues
 
     return mask, msgs
 
