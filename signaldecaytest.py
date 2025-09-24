@@ -310,19 +310,12 @@ def build_precondition_mask(
     if len(base_index) == 0:
         return pd.Series([], index=base_index, dtype=bool), msgs
 
-    # Debug: Show base_index information
-    msgs.append(f"Base index: {len(base_index)} days from {base_index.min().date()} to {base_index.max().date()}")
-
     mask = pd.Series(True, index=base_index, dtype=bool)
     
-
     for i, p in enumerate(preconditions):
         tkr = p.get("signal_ticker", "").strip().upper()
         cmp = p.get("comparison", "greater_than")
         thr = float(p.get("threshold", 50.0))
-        
-        # Debug: Track each precondition
-        msgs.append(f"Processing precondition {i+1}: {tkr} RSI {'≤' if cmp == 'less_than' else '≥'} {thr}")
 
         try:
             # Try to get data with a more aggressive end date to ensure we get recent data
@@ -333,7 +326,6 @@ def build_precondition_mask(
             s = pd.DataFrame()
 
         if s.empty or "close" not in s.columns:
-            msgs.append(f"⚠️ No data for precondition ticker {tkr}; treating as always False.")
             # Create a False series with the same index as mask
             this = pd.Series(False, index=base_index, dtype=bool)
             mask = mask & this  # Use & instead of &= to avoid inplace issues
@@ -351,21 +343,6 @@ def build_precondition_mask(
         # align to main app trading calendar; missing → False
         cond_aligned = cond.reindex(base_index).fillna(False).astype(bool)
         
-        # Debug: Show data availability and alignment
-        data_available = cond.reindex(base_index).notna().sum()
-        total_days = len(base_index)
-        msgs.append(f"  {tkr} data available: {data_available}/{total_days} days ({data_available/total_days:.1%})")
-        
-        # Show the original condition data range vs base_index range
-        if not cond.empty:
-            msgs.append(f"  {tkr} original condition range: {cond.index.min().date()} to {cond.index.max().date()}")
-            msgs.append(f"  {tkr} base_index range: {base_index.min().date()} to {base_index.max().date()}")
-            
-            # Check if there's a mismatch in date ranges
-            if cond.index.max().date() < base_index.max().date():
-                days_behind = (base_index.max().date() - cond.index.max().date()).days
-                msgs.append(f"  ⚠️ {tkr} condition data is {days_behind} days behind base_index!")
-        
         # Ensure both are Series before combining
         if isinstance(mask, pd.DataFrame):
             mask = mask.iloc[:, 0] if mask.shape[1] > 0 else pd.Series([False] * len(base_index), index=base_index, dtype=bool)
@@ -374,18 +351,6 @@ def build_precondition_mask(
         
         # Ensure both series have the same index before combining
         mask = mask & cond_aligned  # Use & instead of &= to avoid inplace issues
-        
-        # Debug: Show mask statistics after this precondition
-        true_count = mask.sum()
-        total_count = len(mask)
-        msgs.append(f"After {tkr}: {true_count}/{total_count} days still pass ({true_count/total_count:.1%})")
-        
-        # Additional debug: Show the date range of the mask
-        if true_count > 0:
-            mask_dates = mask.index[mask]
-            msgs.append(f"  {tkr} mask date range: {mask_dates.min().date()} to {mask_dates.max().date()}")
-        else:
-            msgs.append(f"  {tkr} mask: No valid dates")
 
     # Final safety check: ensure mask has the correct index and dtype
     try:
@@ -412,17 +377,6 @@ def build_precondition_mask(
     except Exception as e:
         # If anything goes wrong, return a safe all-False mask
         mask = pd.Series([False] * len(base_index), index=base_index, dtype=bool)
-    
-    # Final debug: Show the final mask statistics
-    final_true_count = mask.sum()
-    final_total_count = len(mask)
-    msgs.append(f"FINAL MASK: {final_true_count}/{final_total_count} days pass all preconditions ({final_true_count/final_total_count:.1%})")
-    
-    if final_true_count > 0:
-        final_mask_dates = mask.index[mask]
-        msgs.append(f"FINAL MASK date range: {final_mask_dates.min().date()} to {final_mask_dates.max().date()}")
-    else:
-        msgs.append(f"FINAL MASK: No valid dates - this will cause data to end early!")
     
     return mask, msgs
 
@@ -463,7 +417,7 @@ with st.sidebar:
         pc_tkr = st.text_input("Precondition RSI ticker", value="QQQ", key="pc_tkr").strip().upper()
         pc_cmp = st.selectbox(
             "Condition", ["less_than", "greater_than"],
-            index=1,  # default ≥
+            index=0,  # default ≤
             format_func=lambda x: "RSI ≤ threshold" if x == "less_than" else "RSI ≥ threshold",
             key="pc_cmp",
         )
@@ -698,17 +652,6 @@ if auto_start:
     
     earliest_common_date = max(all_ticker_dates)  # This should be max to find the latest start date where all tickers have data
     
-    # Debug: Show what's happening with date adjustment
-    if pre_list:
-        st.info(f"🔍 **Auto-start date adjustment with {len(pre_list)} preconditions:**")
-        st.write(f"**Main tickers start dates:**")
-        st.write(f"- {source_ticker}: {src.index.min().date()}")
-        st.write(f"- {target_ticker}: {tgt.index.min().date()}")
-        st.write(f"- {comparison_ticker}: {cmp.index.min().date()}")
-        st.write(f"**Precondition tickers:**")
-        for info in precondition_data_info:
-            st.write(f"- {info}")
-        st.write(f"**Adjusted start date:** {earliest_common_date} (latest start date where all tickers have data)")
     
     # Update start_date to reflect the actual date being used
     original_start_date = start_date
@@ -720,16 +663,6 @@ if auto_start:
     tgt = load_prices(target_ticker, str(start_date), str(end_date))
     cmp = load_prices(comparison_ticker, str(start_date), str(end_date))
     
-    # Verify that we still have recent data after date adjustment
-    if pre_list:
-        latest_data_date = min(src.index.max().date(), tgt.index.max().date(), cmp.index.max().date())
-        days_behind = (today - latest_data_date).days
-        if days_behind > 2:  # More than 2 days behind
-            st.warning(f"⚠️ **Data freshness issue**: After date adjustment, latest data is {days_behind} days behind today ({latest_data_date}). This may limit recent signal detection.")
-            st.write("**Possible solutions:**")
-            st.write("- Try disabling 'Auto-adjust start date' and use a manual start date")
-            st.write("- Check if any precondition tickers have limited recent data")
-            st.write("- Use the 'Force Recent Data Refresh' button")
 else:
     # Load all three tickers with user's selected start date
     src = load_prices(source_ticker, str(start_date), str(end_date))
@@ -929,17 +862,6 @@ except Exception as e:
 # Surface any data messages
 for m in pc_msgs:
     st.info(m)
-
-# Debug: Show precondition computation info
-if pre_list:
-    st.write(f"**Debug**: Processing {len(pre_list)} preconditions")
-    for i, p in enumerate(pre_list):
-        st.write(f"- {i+1}. {p['signal_ticker']} RSI {'≤' if p['comparison'] == 'less_than' else '≥'} {p['threshold']}")
-    
-    # Show the final mask statistics
-    total_days = len(pc_mask)
-    true_days = pc_mask.sum()
-    st.write(f"**Precondition mask**: {true_days}/{total_days} days pass all preconditions ({true_days/total_days:.1%})")
 
 # Calculate excess returns (target minus comparison) for signal events - entry-aligned
 prices['event_excess'] = np.where(prices['signal'], prices['fwd_ret_entry'] - prices['fwd_ret_cmp_entry'], np.nan)
