@@ -878,6 +878,13 @@ else:
     effective_target_ticker = target_ticker
     effective_comparison_ticker = comparison_ticker
 
+# Debug: Print the effective tickers to see what's being used
+print(f"DEBUG: use_precond_only={use_precond_only}")
+print(f"DEBUG: precond_hold_ticker={precond_hold_ticker}")
+print(f"DEBUG: precond_fallback_ticker={precond_fallback_ticker}")
+print(f"DEBUG: effective_target_ticker={effective_target_ticker}")
+print(f"DEBUG: effective_comparison_ticker={effective_comparison_ticker}")
+
 # Only run analysis if the Run Analysis button has been pressed
 if not st.session_state.get('analysis_run', False):
     st.info("👆 **Click the 'Run Analysis' button above to start the analysis.**")
@@ -1311,7 +1318,7 @@ with col1:
                 fig.add_trace(go.Scatter(x=dates[valid_mask], y=vals[valid_mask],
                                          mode='lines', name='Rolling edge'))
             # Dynamic y-axis label based on edge flavor
-            y_axis_label = (f'Rolling mean excess (target−{comparison_ticker}) over {horizon}D'
+            y_axis_label = (f'Rolling mean excess (target−{effective_comparison_ticker}) over {horizon}D'
                            if edge_flavor == "Excess vs comparison"
                            else f'Rolling mean of {horizon}D fwd returns (on {effective_target_ticker})')
             
@@ -1386,6 +1393,9 @@ with col1:
 
     if build_equity:
         st.subheader("Equity Curve: Target vs Comparison")
+        
+        # Debug: Show the user what tickers are being used
+        st.info(f"🔍 **Debug Info**: Using effective_comparison_ticker = '{effective_comparison_ticker}' for equity curve legend")
 
         # --- Equity Curve: Target vs Comparison (with taxes) ---
         
@@ -1407,10 +1417,14 @@ with col1:
         # Tax-adjust only the strategy
         eq_strat_tax = calculate_tax_adjusted_equity(strat_ret, tax_rate)
 
+        # Debug: Print what ticker is being used for the equity curve
+        print(f"DEBUG EQUITY: effective_comparison_ticker={effective_comparison_ticker}")
+        print(f"DEBUG EQUITY: Creating legend with 'Buy&Hold {effective_comparison_ticker}'")
+        
         eq_df = pd.DataFrame({
             'Strategy (pre-tax)': eq_strat,
             f'Strategy (Tax {tax_rate:.0f}%)': eq_strat_tax,
-            f'Buy&Hold {comparison_ticker}': eq_cmp
+            f'Buy&Hold {effective_comparison_ticker}': eq_cmp
         })
 
         eq_df = _sanitize_for_plot(eq_df)
@@ -1490,7 +1504,7 @@ with col1:
             all_excess = prices['fwd_ret_entry'] - prices['fwd_ret_cmp_entry']
             event_vals = prices.loc[prices['signal'], 'event_excess']
             base_vals  = all_excess
-            x_label = f"{horizon}D excess return (target − {comparison_ticker})"
+            x_label = f"{horizon}D excess return (target − {effective_comparison_ticker})"
         # Clip for display only
         ev = _clip_tails(event_vals, clip_pct)
         bv = _clip_tails(base_vals,  clip_pct) if overlay_baseline else None
@@ -1578,7 +1592,7 @@ with col1:
                 x_label = "Per-event cumulative return (target)"
             else:
                 vals = event_df['excess'].to_numpy()
-                x_label = f"Per-event excess (target − {comparison_ticker})"
+                x_label = f"Per-event excess (target − {effective_comparison_ticker})"
 
             vals = _clip_tails(vals, clip_pct)
             if vals.size < 2:
@@ -1713,7 +1727,7 @@ with col2:
     st.markdown("---")
     st.markdown("**Threshold reference**")
     if use_precond_only:
-        st.write(f"**Mode:** Preconditions-only → Hold **{effective_target_ticker}** when ALL preconditions are True; else hold **{comparison_ticker}**.")
+        st.write(f"**Mode:** Preconditions-only → Hold **{effective_target_ticker}** when ALL preconditions are True; else hold **{effective_comparison_ticker}**.")
     else:
         st.write(f"Signal on **{source_ticker}**, returns on **{effective_target_ticker}**.")
         st.write(thresh_note)
@@ -1778,10 +1792,10 @@ with st.expander("Statistical significance", expanded=False):
         # Pick the series being tested (aligned to entry!):
         if edge_flavor == "Excess vs comparison":
             base_ev = prices.loc[prices['signal'], 'event_excess'].dropna()
-            label = f"{horizon}D excess (target − {comparison_ticker})"
+            label = f"{horizon}D excess (target − {effective_comparison_ticker})"
         else:
             base_ev = prices.loc[prices['signal'], 'fwd_ret_entry'].dropna()
-            label = f"{horizon}D forward return ({target_ticker})"
+            label = f"{horizon}D forward return ({effective_target_ticker})"
 
         # Apply non-overlapping filter if requested
         if use_non_overlap:
