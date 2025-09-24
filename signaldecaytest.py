@@ -30,10 +30,22 @@ def compute_rsi(close: pd.Series, length: int = 14) -> pd.Series:
 @st.cache_data(ttl=24*3600, show_spinner=False)
 def load_prices(ticker: str, start: str, end: str) -> pd.DataFrame:
     try:
+        # Try multiple approaches to get the most recent data
         df = yf.download(ticker, start=start, end=end, auto_adjust=True, progress=False)
         if df.empty:
             # Try with different parameters if first attempt fails
             df = yf.download(ticker, start=start, end=end, auto_adjust=False, progress=False)
+        if df.empty:
+            # Try extending the end date to ensure we get recent data
+            from datetime import datetime, timedelta
+            extended_end = (datetime.strptime(end, '%Y-%m-%d') + timedelta(days=7)).strftime('%Y-%m-%d')
+            df = yf.download(ticker, start=start, end=extended_end, auto_adjust=True, progress=False)
+        if df.empty:
+            # Try using the Ticker object for more recent data
+            ticker_obj = yf.Ticker(ticker)
+            hist = ticker_obj.history(start=start, end=end, auto_adjust=True)
+            if not hist.empty:
+                df = hist[['Close']].rename(columns={'Close': 'close'})
         if df.empty:
             return df
         df = df[['Close']].rename(columns={'Close': 'close'})
@@ -488,7 +500,7 @@ with st.sidebar:
     else:
         start_date = st.date_input("Start date", value=default_start, max_value=today - timedelta(days=1))
     
-    end_date = st.date_input("End date", value=today + timedelta(days=1))
+    end_date = st.date_input("End date", value=today + timedelta(days=7))
 
     edge_mode = st.radio(
         "Edge mode",
@@ -550,6 +562,12 @@ with st.sidebar:
     if st.button("🔄 Clear Data Cache (if having ticker issues)"):
         st.cache_data.clear()
         st.success("Cache cleared! Please refresh the page.")
+        st.rerun()
+    
+    # Add option to force recent data refresh
+    if st.button("📅 Force Recent Data Refresh"):
+        st.cache_data.clear()
+        st.info("🔄 **Forcing data refresh to get the most recent data...**")
         st.rerun()
     
 
@@ -688,7 +706,14 @@ st.success(f"📊 **Data loaded successfully**: {len(prices)} trading days from 
 
 # Debug: Show date range info
 if prices.index[-1].date() < end_date:
-    st.info(f"ℹ️ **Note**: Data ends on {prices.index[-1].strftime('%Y-%m-%d')}, but you requested data until {end_date.strftime('%Y-%m-%d')}. This is normal - yfinance may not have data for the most recent dates yet.")
+    days_behind = (end_date - prices.index[-1].date()).days
+    st.info(f"ℹ️ **Note**: Data ends on {prices.index[-1].strftime('%Y-%m-%d')}, but you requested data until {end_date.strftime('%Y-%m-%d')} ({days_behind} days behind). This is normal - yfinance may not have data for the most recent dates yet.")
+    
+    # Show individual ticker data ranges for debugging
+    st.write("**Individual ticker data ranges:**")
+    st.write(f"- {source_ticker}: {src.index.min().date()} to {src.index.max().date()}")
+    st.write(f"- {target_ticker}: {tgt.index.min().date()} to {tgt.index.max().date()}")
+    st.write(f"- {comparison_ticker}: {cmp.index.min().date()} to {cmp.index.max().date()}")
 
 
 prices['rsi'] = compute_rsi(prices['close_src'], rsi_len)
