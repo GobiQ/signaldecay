@@ -273,9 +273,6 @@ def build_precondition_mask(
 
     mask = pd.Series(True, index=base_index, dtype=bool)
     
-    # Debug: Check initial mask type
-    if isinstance(mask, pd.DataFrame):
-        msgs.append("⚠️ Initial mask is DataFrame instead of Series")
 
     for p in preconditions:
         tkr = p.get("signal_ticker", "").strip().upper()
@@ -298,27 +295,13 @@ def build_precondition_mask(
         s.index = pd.to_datetime(s.index).tz_localize(None)
         rsi = compute_rsi(s["close"], rsi_len)
         
-        # Debug: Check RSI type
-        if isinstance(rsi, pd.DataFrame):
-            msgs.append(f"⚠️ RSI is DataFrame for {tkr}")
-
         if cmp == "less_than":
             cond = (rsi <= thr)
         else:
             cond = (rsi >= thr)
-            
-        # Debug: Check condition type
-        if isinstance(cond, pd.DataFrame):
-            msgs.append(f"⚠️ Condition is DataFrame for {tkr}")
 
         # align to main app trading calendar; missing → False
         cond_aligned = cond.reindex(base_index).fillna(False).astype(bool)
-        
-        # Debug: Check types before combining
-        if isinstance(mask, pd.DataFrame):
-            msgs.append(f"⚠️ Mask became DataFrame before combining with {tkr}")
-        if isinstance(cond_aligned, pd.DataFrame):
-            msgs.append(f"⚠️ cond_aligned is DataFrame for {tkr}")
         
         # Ensure both are Series before combining
         if isinstance(mask, pd.DataFrame):
@@ -341,23 +324,19 @@ def build_precondition_mask(
             else:
                 # Multiple columns - this shouldn't happen, create a new Series
                 mask = pd.Series([False] * len(base_index), index=base_index, dtype=bool)
-                msgs.append("⚠️ Precondition mask was a DataFrame with multiple columns - using all-False mask")
         
         # Ensure the mask has exactly the same length as base_index
         if len(mask) != len(base_index):
             # Force correct length by creating a new series
             mask = pd.Series([False] * len(base_index), index=base_index, dtype=bool)
-            msgs.append("⚠️ Precondition mask length mismatch - using all-False mask")
             
         # Final verification that we have a Series
         if not isinstance(mask, pd.Series):
             mask = pd.Series([False] * len(base_index), index=base_index, dtype=bool)
-            msgs.append("⚠️ Precondition mask was not a Series - using all-False mask")
             
     except Exception as e:
         # If anything goes wrong, return a safe all-False mask
         mask = pd.Series([False] * len(base_index), index=base_index, dtype=bool)
-        msgs.append(f"⚠️ Error in precondition mask creation: {str(e)} - using all-False mask")
     
     return mask, msgs
 
@@ -627,11 +606,6 @@ if auto_start:
     original_start_date = start_date
     start_date = earliest_common_date
     
-    # Always reload with the earliest common date to maximize data coverage
-    if pre_list:
-        st.info(f"📅 **Analysis period: {start_date} to {end_date}** (auto-adjusted to include precondition tickers)")
-    else:
-        st.info(f"📅 **Analysis period: {start_date} to {end_date}**")
     
     # Reload data with the earliest possible start date
     src = load_prices(source_ticker, str(start_date), str(end_date))
@@ -769,10 +743,6 @@ try:
     
     # Additional safety: ensure pc_mask_aligned is a Series
     if isinstance(pc_mask_aligned, pd.DataFrame):
-        st.warning(f"⚠️ **DataFrame detected instead of Series**: pc_mask_aligned has shape {pc_mask_aligned.shape}")
-        st.write("**Debug info:**")
-        st.write(f"- pc_mask_aligned type: {type(pc_mask_aligned)}")
-        st.write(f"- pc_mask_aligned shape: {pc_mask_aligned.shape}")
         # Force it to be a Series by taking the first column
         pc_mask_aligned = pc_mask_aligned.iloc[:, 0] if pc_mask_aligned.shape[1] > 0 else pd.Series([False] * len(prices.index), index=prices.index, dtype=bool)
     
@@ -787,13 +757,6 @@ try:
     # Ensure both arrays have the same length
     if len(signal_values) != len(mask_values):
         st.error(f"❌ **Array length mismatch**: signal ({len(signal_values)}) vs mask ({len(mask_values)})")
-        st.write("**Debug info:**")
-        st.write(f"- prices['signal'] length: {len(prices['signal'])}")
-        st.write(f"- pc_mask length: {len(pc_mask)}")
-        st.write(f"- pc_mask_aligned length: {len(pc_mask_aligned)}")
-        st.write(f"- prices.index length: {len(prices.index)}")
-        st.write(f"- signal_values shape: {signal_values.shape}")
-        st.write(f"- mask_values shape: {mask_values.shape}")
         st.write("**Solution**: Try refreshing the page or clearing the cache.")
         st.stop()
     
@@ -806,12 +769,6 @@ try:
         
 except Exception as e:
     st.error(f"❌ **Error applying preconditions**: {str(e)}")
-    st.write("**Debug info:**")
-    st.write(f"- prices['signal'] length: {len(prices['signal'])}")
-    st.write(f"- prices['signal'] index length: {len(prices['signal'].index)}")
-    st.write(f"- pc_mask length: {len(pc_mask)}")
-    st.write(f"- pc_mask index length: {len(pc_mask.index)}")
-    st.write(f"- prices.index length: {len(prices.index)}")
     st.write("**Solution**: Try refreshing the page or clearing the cache.")
     st.stop()
 
