@@ -475,7 +475,8 @@ with st.sidebar:
                     "comparison": pc_cmp,
                     "threshold": float(pc_thr),
                 })
-                # Precondition added successfully
+                st.success(f"✅ Added precondition: {pc_tkr} RSI {'≤' if pc_cmp == 'less_than' else '≥'} {pc_thr}")
+                st.rerun()
 
     # Bulk clear
     if st.session_state.preconditions:
