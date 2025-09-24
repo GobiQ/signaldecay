@@ -479,8 +479,6 @@ with st.sidebar:
             })
             # Clear cache when adding a precondition
             st.cache_data.clear()
-            # Force a complete refresh by setting a flag
-            st.session_state.force_data_refresh = True
             # Add debug info
             st.info(f"🔍 **Debug**: Added precondition for {pc_tkr}. Total preconditions: {len(st.session_state.preconditions)}")
             st.rerun()
@@ -643,10 +641,12 @@ if not source_ticker or not target_ticker or not comparison_ticker:
     st.warning("Enter all three ticker symbols to begin.")
     st.stop()
 
-# Check if we need to force a data refresh
-force_refresh = st.session_state.get('force_data_refresh', False)
-if force_refresh:
-    st.session_state.force_data_refresh = False  # Reset the flag
+# Check if we have preconditions - if so, use uncached data for consistency
+has_preconditions = len(st.session_state.get("preconditions", [])) > 0
+if has_preconditions:
+    st.info(f"🔄 **Debug**: Preconditions detected - using uncached data for consistency")
+else:
+    st.info(f"🔄 **Debug**: No preconditions - using cached data")
 
 # Auto-adjust start date to earliest common date if requested
 if auto_start:
@@ -655,7 +655,7 @@ if auto_start:
     early_start = date(1990, 1, 1)
     
     # Load all three tickers from the early start date
-    if force_refresh:
+    if has_preconditions:
         src = load_prices_uncached(source_ticker, str(early_start), str(end_date))
         tgt = load_prices_uncached(target_ticker, str(early_start), str(end_date))
         cmp = load_prices_uncached(comparison_ticker, str(early_start), str(end_date))
@@ -726,7 +726,7 @@ if auto_start:
     
     
     # Reload data with the earliest possible start date
-    if force_refresh:
+    if has_preconditions:
         src = load_prices_uncached(source_ticker, str(start_date), str(end_date))
         tgt = load_prices_uncached(target_ticker, str(start_date), str(end_date))
         cmp = load_prices_uncached(comparison_ticker, str(start_date), str(end_date))
@@ -737,7 +737,7 @@ if auto_start:
     
 else:
     # Load all three tickers with user's selected start date
-    if force_refresh:
+    if has_preconditions:
         src = load_prices_uncached(source_ticker, str(start_date), str(end_date))
         tgt = load_prices_uncached(target_ticker, str(start_date), str(end_date))
         cmp = load_prices_uncached(comparison_ticker, str(start_date), str(end_date))
