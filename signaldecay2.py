@@ -1,8 +1,3 @@
-# rsi_signal_stability_app.py
-# Streamlit app to analyze stability/decay of RSI-based signals using absolute or percentile thresholds
-# Author: Gobi and his AI pals
-# Run: streamlit run rsi_signal_stability_app.py
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -530,10 +525,10 @@ def build_precondition_mask(
 # -----------------------------
 # UI
 # -----------------------------
-st.set_page_config(page_title="Signal Decay", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Signal Scope", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
 
-st.title("Signal Decay")
-st.caption("RSI Signal Statistics")
+st.title("Signal Scope")
+st.caption("Signal Statistics")
 
 with st.sidebar:
     st.header("Controls")
