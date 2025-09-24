@@ -456,8 +456,8 @@ with st.sidebar:
             with cols[1]:
                 if st.button("🗑️", key=f"remove_pre_{i}"):
                     st.session_state.preconditions.pop(i)
-                    # Clear cache when removing a precondition
-                    st.cache_data.clear()
+                    # Reset run analysis flag when preconditions change
+                    st.session_state.run_analysis = False
                     st.rerun()
     else:
         st.caption("Add optional RSI gates on other tickers that must also be true.")
@@ -477,8 +477,8 @@ with st.sidebar:
                 "comparison": pc_cmp,
                 "threshold": float(pc_thr),
             })
-            # Clear cache when adding a precondition
-            st.cache_data.clear()
+            # Reset run analysis flag when preconditions change
+            st.session_state.run_analysis = False
             # Add debug info
             st.info(f"🔍 **Debug**: Added precondition for {pc_tkr}. Total preconditions: {len(st.session_state.preconditions)}")
             st.rerun()
@@ -487,10 +487,32 @@ with st.sidebar:
     if st.session_state.preconditions:
         if st.button("🗑️ Clear all preconditions", type="secondary"):
             st.session_state.preconditions = []
-            # Clear cache when clearing all preconditions
-            st.cache_data.clear()
+            # Reset run analysis flag when preconditions change
+            st.session_state.run_analysis = False
             st.rerun()
 
+    st.markdown("---")
+    
+    # Run Analysis Button
+    st.subheader("Run Analysis")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
+            st.session_state.run_analysis = True
+            st.rerun()
+    
+    with col2:
+        if st.button("🔄 Reset", use_container_width=True):
+            st.session_state.run_analysis = False
+            st.rerun()
+    
+    # Show status
+    if st.session_state.get("run_analysis", False):
+        st.success("✅ Analysis is running...")
+    else:
+        st.info("👆 Click 'Run Analysis' to start the analysis")
+    
     st.markdown("---")
     
     source_ticker = st.text_input("Signal ticker (for RSI signal)", value="SPY", 
@@ -641,13 +663,14 @@ if not source_ticker or not target_ticker or not comparison_ticker:
     st.warning("Enter all three ticker symbols to begin.")
     st.stop()
 
-# Simple approach: always clear cache when preconditions are present
-has_preconditions = len(st.session_state.get("preconditions", [])) > 0
-if has_preconditions:
-    st.cache_data.clear()
-    st.info(f"🔄 **Debug**: Preconditions present - cache cleared for data consistency")
-else:
-    st.info(f"🔄 **Debug**: No preconditions - using cached data")
+# Only run analysis if the Run Analysis button has been clicked
+if not st.session_state.get("run_analysis", False):
+    st.info("👆 **Please click 'Run Analysis' to start the analysis**")
+    st.stop()
+
+# Clear cache when running analysis (equivalent to manual cache clear)
+st.cache_data.clear()
+st.info(f"🔄 **Debug**: Running analysis - cache cleared for fresh data")
 
 # Auto-adjust start date to earliest common date if requested
 if auto_start:
