@@ -615,12 +615,6 @@ with st.sidebar:
     download_switch = st.checkbox("Enable CSV download of results", value=True,
                                  help="Allow downloading the analysis results as a CSV file containing all calculated values (RSI, signals, returns, etc.) for further analysis.")
     
-    # Run Analysis Button (replaces the manual cache clearing)
-    if st.button("🚀 Run Analysis", type="primary", use_container_width=True):
-        st.cache_data.clear()
-        st.success("Cache cleared! Please refresh the page.")
-        st.rerun()
-    
     # Add cache clearing option for debugging
     if st.button("🔄 Clear Data Cache (if having ticker issues)"):
         st.cache_data.clear()
