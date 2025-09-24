@@ -718,43 +718,10 @@ if prices.empty:
 # Data summary banner
 st.success(f"📊 **Data loaded successfully**: {len(prices)} trading days from {prices.index[0].strftime('%Y-%m-%d')} to {prices.index[-1].strftime('%Y-%m-%d')}")
 
-# Debug: Show date range info
-if prices.index[-1].date() < end_date:
-    days_behind = (end_date - prices.index[-1].date()).days
-    st.info(f"ℹ️ **Note**: Data ends on {prices.index[-1].strftime('%Y-%m-%d')}, but you requested data until {end_date.strftime('%Y-%m-%d')} ({days_behind} days behind). This is normal - yfinance may not have data for the most recent dates yet.")
-    
-    # Show individual ticker data ranges for debugging
-    st.write("**Individual ticker data ranges:**")
-    st.write(f"- {source_ticker}: {src.index.min().date()} to {src.index.max().date()}")
-    st.write(f"- {target_ticker}: {tgt.index.min().date()} to {tgt.index.max().date()}")
-    st.write(f"- {comparison_ticker}: {cmp.index.min().date()} to {cmp.index.max().date()}")
-else:
-    # Show when data is up to date
-    st.success(f"✅ **Data is current**: Latest data through {prices.index[-1].strftime('%Y-%m-%d')}")
 
 
 prices['rsi'] = compute_rsi(prices['close_src'], rsi_len)
 
-# Check for recent RSI signals and display them prominently
-recent_days = 7  # Check last 7 days
-recent_data = prices.tail(recent_days)
-recent_signals = recent_data[recent_data['rsi'].notna()]
-
-if not recent_signals.empty:
-    # Check for high RSI signals (assuming user is looking for RSI > 80 based on their example)
-    high_rsi_threshold = 80
-    recent_high_rsi = recent_signals[recent_signals['rsi'] > high_rsi_threshold]
-    
-    if not recent_high_rsi.empty:
-        st.warning(f"🚨 **Recent RSI Signals Detected**: Found {len(recent_high_rsi)} RSI > {high_rsi_threshold} signals in the last {recent_days} days:")
-        for date, row in recent_high_rsi.iterrows():
-            st.write(f"• {date.strftime('%Y-%m-%d')}: RSI = {row['rsi']:.2f}")
-        st.write("These signals should be visible in the charts below.")
-    else:
-        # Show the highest RSI in recent period for context
-        max_recent_rsi = recent_signals['rsi'].max()
-        if pd.notna(max_recent_rsi):
-            st.info(f"ℹ️ **Recent RSI Context**: Highest RSI in last {recent_days} days was {max_recent_rsi:.2f} (no signals > {high_rsi_threshold})")
 
 # Forward returns aligned to entry day (t+1) to match equity curve logic
 fwd_ret_raw = forward_return(prices['close_tgt'], horizon)
