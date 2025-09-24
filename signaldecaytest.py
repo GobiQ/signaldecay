@@ -507,7 +507,7 @@ with st.sidebar:
         st.caption("Add optional RSI gates on other tickers that must also be true.")
 
     with st.expander("➕ Add Precondition"):
-        tabs = st.tabs(["Static: RSI vs threshold", "Pair: RSI vs RSI"])
+        tabs = st.tabs(["Static RSI", "Pair RSI"])
 
         # --- STATIC (existing behavior) ---
         with tabs[0]:
@@ -516,14 +516,11 @@ with st.sidebar:
                 pc_len = st.number_input("RSI length (days)", min_value=2, max_value=200, value=10, step=1)
                 pc_cmp = st.selectbox(
                     "Condition",
-                    ["less_than", "greater_than", "less_equal", "greater_equal", "equal"],
+                    ["less_than", "greater_than"],
                     index=0,
                     format_func=lambda x: {
                         "less_than": "RSI < threshold",
-                        "greater_than": "RSI > threshold", 
-                        "less_equal": "RSI ≤ threshold",
-                        "greater_equal": "RSI ≥ threshold",
-                        "equal": "RSI = threshold"
+                        "greater_than": "RSI > threshold"
                     }[x],
                 )
                 pc_thr = st.number_input("RSI threshold", min_value=0.0, max_value=100.0, value=80.0, step=0.5)
@@ -552,13 +549,10 @@ with st.sidebar:
 
                 op = st.selectbox(
                     "Comparison",
-                    ["less_than", "greater_than", "less_equal", "greater_equal", "equal"],
+                    ["less_than", "greater_than"],
                     index=0,
                     format_func=lambda x: {"less_than": "LHS RSI < RHS RSI",
-                                           "greater_than": "LHS RSI > RHS RSI",
-                                           "less_equal": "LHS RSI ≤ RHS RSI",
-                                           "greater_equal": "LHS RSI ≥ RHS RSI",
-                                           "equal": "LHS RSI = RHS RSI"}[x],
+                                           "greater_than": "LHS RSI > RHS RSI"}[x],
                 )
 
                 submitted_pair = st.form_submit_button("Add")
